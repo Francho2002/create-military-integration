@@ -1,0 +1,63 @@
+plugins {
+    id 'java-library'
+    id 'net.neoforged.moddev' version '2.0.148'
+}
+group = 'local.cmi'
+version = '0.1.0-dev'
+base { archivesName = 'create-military-integration' }
+java { toolchain.languageVersion = JavaLanguageVersion.of(21); withSourcesJar() }
+neoForge { version = '21.1.265'; mods { create_military_integration { sourceSet sourceSets.main } } }
+repositories { mavenCentral() }
+def modsDirectory = providers.gradleProperty('modpackDir').orElse(providers.environmentVariable('CMI_MODPACK_DIR'))
+def candidatesDirectory = providers.gradleProperty('candidatesDir').orElse(providers.environmentVariable('CMI_CANDIDATES_DIR'))
+if (!modsDirectory.present || !candidatesDirectory.present) throw new GradleException('Set -PmodpackDir=<client mods directory> -PcandidatesDir=<_descompiled/mods>. Originals are read only.')
+def sourceJars = fileTree(modsDirectory.get()) {
+    include 'create-*.jar', 'createbigcannons-*.jar', 'sable-neoforge-*.jar', 'cbc*.jar', 'wariumce-*.jar', 'ftb-*.jar', 'minecolonies-*.jar', 'structurize-*.jar', 'blockui-*.jar', 'domum-ornamentum-*.jar', 'architectury-*.jar', 'geckolib-*.jar', 'ritchiesprojectilelib-*.jar'
+    exclude 'create-enchantment-*.jar'
+}.files + ['create-radars-0.4.9.4.jar', 'create-better-targeting-1.0.0.1.jar'].collect { file("${candidatesDirectory.get()}/$it") }
+// Nested API libraries remain external compile-only dependencies, never packaged in CMI.
+def nestedDir = layout.buildDirectory.dir('compile-nested').get().asFile
+def nestedFiles = []
+def nestedEntries = []
+sourceJars.each { jar ->
+    if (!jar.exists()) throw new GradleException("Missing dependency: $jar")
+    new java.util.zip.ZipFile(jar).withCloseable { z ->
+        z.entries().each { e ->
+            if (e.name.startsWith('META-INF/jarjar/') && e.name.endsWith('.jar')) {
+                def out = new File(nestedDir, jar.name + '-' + e.name.tokenize('/').last())
+                nestedFiles.add(out)
+                nestedEntries.add([jar: jar, entry: e.name, output: out])
+            }
+        }
+    }
+}
+dependencies { compileOnly files(sourceJars); compileOnly files(nestedFiles) }
+tasks.register('extractCompileApis') {
+    inputs.files(sourceJars)
+    outputs.files(nestedFiles)
+    doLast {
+        nestedDir.mkdirs()
+        nestedEntries.each { item ->
+            new java.util.zip.ZipFile(item.jar).withCloseable { z ->
+                z.getInputStream(z.getEntry(item.entry)).withCloseable { input -> item.output.withOutputStream { it << input } }
+            }
+        }
+    }
+}
+tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8'; options.release = 21; options.compilerArgs += ['-proc:none'] }
+tasks.withType(AbstractArchiveTask).configureEach { preserveFileTimestamps = false; reproducibleFileOrder = true }
+tasks.register('verifyDependencies') {
+    doLast {
+        def expected = new Properties()
+        file('dependency-hashes.properties').withInputStream { expected.load(it) }
+        expected.each { name, hash ->
+            def jar = sourceJars.find { it.name == name }
+            if (jar == null) throw new GradleException("Missing pinned dependency $name")
+            def actual = java.security.MessageDigest.getInstance('SHA-256').digest(jar.bytes).encodeHex().toString()
+            if (!actual.equalsIgnoreCase(hash.toString())) throw new GradleException("Dependency changed: $name ($actual)")
+        }
+    }
+}
+tasks.named('compileJava') { dependsOn 'verifyDependencies', 'extractCompileApis' }
+tasks.register('forbidGameExecution') { doLast { throw new GradleException('Game execution disabled in this development project.') } }
+tasks.matching { it.name.startsWith('run') }.configureEach { dependsOn 'forbidGameExecution' }

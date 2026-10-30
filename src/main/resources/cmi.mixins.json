@@ -1,0 +1,29 @@
+{
+  "required": true,
+  "minVersion": "0.8.7",
+  "package": "local.cmi.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "weapons.MediumMaterialAccess",
+    "weapons.RotaryMaterialAccess",
+    "weapons.ProjectileBallisticsAccess",
+    "weapons.WariumCannonAccess",
+    "weapons.LauncherMaterialAccess",
+    "weapons.StandardLauncherTickMixin",
+    "weapons.CannonProbeNeoMixin",
+    "missiles.InfraredGuidanceMixin",
+    "missiles.IRSeekerTargetLossMixin",
+    "missiles.RadarSpearEntityMixin",
+    "missiles.RadarSpearFlightMixin",
+    "safety.RadarBearingMixin",
+    "safety.FireControllerPersistenceMixin",
+    "safety.BallisticSafetyMixin",
+    "safety.CannonInterceptionMixin",
+    "safety.CompactTickMixin",
+    "safety.ComputerTargetAccess",
+    "safety.TargetAuthorizationMixin",
+    "safety.NativeFireGuardMixin",
+    "safety.ShotOwnershipMixin"
+  ],
+  "injectors": { "defaultRequire": 1 }
+}
