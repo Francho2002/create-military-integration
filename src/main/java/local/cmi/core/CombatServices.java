@@ -47,7 +47,7 @@ public final class CombatServices {
     public static Relation relation(ServerLevel l,Actor a,MilitaryContact c){server(l);if(a.owner()==null)return Relation.UNKNOWN;if(c.id().kind()==TargetId.Kind.ENTITY){var e=l.getEntity(c.id().uuid());if(e!=null&&net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(e.getType()).getNamespace().equals("minecolonies"))return Relation.FRIEND;}if(a.platform()!=null&&a.platform().equals(c.platform()))return Relation.FRIEND;if(a.owner().equals(c.owner()))return Relation.FRIEND;
         var allegiance=Iff.Allegiance.of(l,a.owner(),"",List.of(),a.iff()==null?"":a.iff());
         if(c.id().kind()==TargetId.Kind.SABLE){var container=SubLevelContainer.getContainer(l);var s=container==null?null:container.getSubLevel(c.id().uuid());if(s!=null&&Iff.ship(l,allegiance,c.id().uuid(),s.getName(),com.mrvew.firecontrol.target.Sensor.crews(l).getOrDefault(c.id().uuid(),List.of()))==Iff.Side.FRIEND)return Relation.FRIEND;}
-        if(c.owner()!=null){if(Iff.playerId(l,allegiance,c.owner())==Iff.Side.FRIEND)return Relation.FRIEND;return CmiData.get(l).enemy(a.owner(),c.owner())?Relation.ENEMY:Relation.NEUTRAL;}
+        if(c.owner()!=null)return ShipOwnership.ownerRelation(a.owner(),c.owner(),Iff.playerId(l,allegiance,c.owner())==Iff.Side.FRIEND,CmiData.get(l).enemy(a.owner(),c.owner()));
         if(c.id().kind()==TargetId.Kind.ENTITY&&l.getEntity(c.id().uuid()) instanceof Enemy)return Relation.ENEMY;return Relation.UNKNOWN;
     }
     public static boolean canEngage(ServerLevel l,Actor a,MilitaryContact c){var current=resolve(l,c.id());return current.isPresent()&&relation(l,a,current.get())==Relation.ENEMY&&!isProtected(l,a,current.get().position());}

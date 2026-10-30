@@ -1,11 +1,15 @@
 package local.cmi;
 import com.mojang.brigadier.arguments.*;
 import java.util.UUID;
+import java.util.List;
 import local.cmi.core.*;
+import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
+import dev.ryanhcode.sable.companion.SubLevelAccess;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.*;
 import net.minecraft.commands.arguments.coordinates.BlockPosArgument;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
@@ -33,6 +37,11 @@ public final class CreateMilitaryIntegration {
         var t=event.getEntity().getPersistentData();if(ShotContext.managed())t.putBoolean("cmiManagedShot",true);t.putUUID("cmiOwner",actor.owner());t.putString("cmiIff",actor.iff()==null?"":actor.iff());if(actor.platform()!=null)t.putUUID("cmiPlatform",actor.platform());
     }
     private void stopped(ServerStoppedEvent event){CombatServices.clear();}
+    private static List<? extends SubLevelAccess> loadedShips(ServerLevel level){
+        var container=SubLevelContainer.getContainer(level);
+        if(container==null)return List.of();
+        return container.getAllSubLevels().stream().filter(s->!s.isRemoved()).toList();
+    }
     private void commands(RegisterCommandsEvent e){
         e.getDispatcher().register(Commands.literal("cmi").requires(s->s.hasPermission(2))
             .then(Commands.literal("claim").then(Commands.argument("pos",BlockPosArgument.blockPos()).executes(ctx->{
@@ -40,8 +49,33 @@ public final class CreateMilitaryIntegration {
                 if(be==null)throw new com.mojang.brigadier.exceptions.SimpleCommandExceptionType(Component.literal("No block entity at position")).create();
                 var a=CombatServices.actor(l,p);a=new Actor(player.getUUID(),a.iff(),a.platform());CmiData.get(l).claim(p,a);be.getPersistentData().putUUID("cmiOwner",player.getUUID());be.setChanged();source.sendSuccess(()->Component.literal("CMI ownership recorded"),false);return 1;
             })))
+            .then(Commands.literal("ships").executes(ctx->{
+                var source=ctx.getSource();var level=source.getLevel();var ships=loadedShips(level);var data=CmiData.get(level);
+                source.sendSuccess(()->Component.literal("Loaded Sable ships: "+ships.size()),false);
+                for(var ship:ships){var owner=data.ship(ship.getUniqueId());String ownerText=owner==null||owner.owner()==null?"unowned":owner.owner().toString();String name=String.valueOf(ship.getName());source.sendSuccess(()->Component.literal(ship.getUniqueId()+" | "+name+" | owner: "+ownerText),false);}
+                return ships.size();
+            }))
+            .then(Commands.literal("shipowner").then(Commands.argument("shipUuid",UuidArgument.uuid()).then(Commands.argument("ownerUuid",UuidArgument.uuid()).executes(ctx->{
+                var source=ctx.getSource();var level=source.getLevel();UUID shipId=UuidArgument.getUuid(ctx,"shipUuid"),ownerId=UuidArgument.getUuid(ctx,"ownerUuid");
+                var loaded=loadedShips(level);var ship=loaded.stream().filter(s->s.getUniqueId().equals(shipId)).findFirst().orElse(null);
+                if(ship==null){source.sendFailure(Component.literal("Sable UUID is not currently loaded: "+shipId));return 0;}
+                if(!ShipOwnership.assignLoaded(CmiData.get(level),loaded.stream().map(SubLevelAccess::getUniqueId).toList(),shipId,ownerId)){source.sendFailure(Component.literal("Could not assign CMI ownership to loaded Sable."));return 0;}
+                String name=String.valueOf(ship.getName());source.sendSuccess(()->Component.literal("CMI owner set: ship "+shipId+" ("+name+") -> "+ownerId),false);return 1;
+            }))))
+            .then(Commands.literal("relation").then(Commands.argument("shipUuid",UuidArgument.uuid()).executes(ctx->{
+                var source=ctx.getSource();var level=source.getLevel();UUID shipId=UuidArgument.getUuid(ctx,"shipUuid");
+                var contact=CombatServices.resolve(level,new TargetId(TargetId.Kind.SABLE,shipId));
+                if(contact.isEmpty()){source.sendFailure(Component.literal("Sable UUID is not currently loaded: "+shipId));return 0;}
+                var player=source.getPlayerOrException();var actor=CombatServices.actor(level,player);var owner=CmiData.get(level).ship(shipId);
+                String ownerText=owner==null||owner.owner()==null?"unowned":owner.owner().toString();Relation relation=CombatServices.relation(level,actor,contact.get());
+                source.sendSuccess(()->Component.literal("Sable "+shipId+" | owner: "+ownerText+" | platform: "+String.valueOf(contact.get().platform())+" | relation to you: "+relation),false);return 1;
+            })))
             .then(Commands.literal("hostile").then(Commands.argument("player",EntityArgument.player()).then(Commands.argument("enabled",BoolArgumentType.bool()).executes(ctx->{
                 var s=ctx.getSource();CmiData.get(s.getLevel()).hostile(s.getPlayerOrException().getUUID(),EntityArgument.getPlayer(ctx,"player").getUUID(),BoolArgumentType.getBool(ctx,"enabled"));s.sendSuccess(()->Component.literal("CMI hostility updated (allied relations still prevail)"),false);return 1;
+            }))))
+            .then(Commands.literal("hostileuuid").then(Commands.argument("ownerUuid",UuidArgument.uuid()).then(Commands.argument("enabled",BoolArgumentType.bool()).executes(ctx->{
+                var s=ctx.getSource();UUID target=UuidArgument.getUuid(ctx,"ownerUuid"),issuer=s.getPlayerOrException().getUUID();boolean enabled=BoolArgumentType.getBool(ctx,"enabled");
+                CmiData.get(s.getLevel()).hostile(issuer,target,enabled);s.sendSuccess(()->Component.literal("CMI hostility for owner "+target+" set to "+enabled+" (FTB/IFF allies still prevail)"),false);return 1;
             }))))
             .then(Commands.literal("heat").then(Commands.argument("ship",UuidArgument.uuid()).then(Commands.argument("enabled",BoolArgumentType.bool()).executes(ctx->{var s=ctx.getSource();CmiData.get(s.getLevel()).hot(UuidArgument.getUuid(ctx,"ship"),BoolArgumentType.getBool(ctx,"enabled"));s.sendSuccess(()->Component.literal("CMI explicit thermal signature updated"),false);return 1;}))))
             .then(Commands.literal("interceptor").then(Commands.argument("pos",BlockPosArgument.blockPos()).then(Commands.argument("enabled",BoolArgumentType.bool()).executes(ctx->{

@@ -2,6 +2,19 @@
 
 Esta tabla describe el código, no una prueba dentro de Minecraft. Compilación no demuestra aplicación correcta de mixins.
 
+## Ciclo 2E.1: administración explícita de propiedad Sable (sin validación runtime nueva)
+
+- En HEAD `83d97789d26c90dc3cfc0992ab99a630ef531b70` se agregó `/cmi ships`, que enumera solo subniveles Sable cargados con UUID, nombre expuesto por Sable y owner CMI o `unowned`.
+- `/cmi shipowner <shipUuid> <ownerUuid>` resuelve la nave en el `SubLevelContainer` del `ServerLevel`, rechaza UUID no cargado/retirado y escribe exclusivamente en `CmiData.ships` mediante `bindShip`, conservando el IFF anterior y fijando `Actor.platform` al UUID de la nave. No busca block entities del plot ni escribe NBT privado de Sable.
+- `/cmi hostileuuid <ownerUuid> <enabled>` registra hostilidad desde el UUID del jugador que ejecuta el comando hacia el UUID propietario indicado, aunque ese jugador blanco esté offline. `/cmi hostile <player> <enabled>` permanece intacto. `/cmi relation <shipUuid>` es de solo lectura y muestra owner, plataforma y relación para el ejecutor actual.
+- La versión fijada de Better Targeting implementa `Iff.playerId(ServerLevel, Allegiance, UUID)` mediante igualdad/lista de UUID, consulta `FtbCompat.teamFriend(owner, id)` y no requiere que el jugador blanco esté conectado. El acceso de FTB Teams/Chunks también usa UUID (`arePlayersInSameTeam`, `getTeamForPlayerID`, `isAlly`). En CMI, FRIEND por owner/IFF/FTB continúa precediendo a la hostilidad explícita; una nave sin owner continúa como UNKNOWN. No se añadió bypass de IFF.
+- Regresión Java nueva `shipOwnershipRegression`: asociación solo a UUID enumerados como cargados, cambio de owner, preservación de IFF y platform, round-trip SavedData NBT, hostilidad true/false, rechazo/null/UNKNOWN, FRIEND por mismo owner y precedencia de aliado, además de guardas estáticas sobre comandos y `/cmi claim`.
+- `clean build` pasó con Java 21; `check` pasó las nueve regresiones JavaExec. Los ocho verificadores actuales aprobaron: artefacto, targets de mixin, bytecode Radar Spear, colisión AbstractArrow, bytecode Sable, geometría, bytecode de guiado y área Radar Spear. El artefacto resultante tiene SHA-256 `CF00AA0E5E9B9249B508C0CF1264B2ACC615F440A764D80B2C4A0C0180F84AA3`.
+- El proceso 6016 fue comprobado de nuevo como `java.exe` dentro de `CMI-Cycle-2E-Test` (NeoForge 21.1.265), pero esta sesión no tiene una consola `stop` accesible. No se fuerza su terminación ni se reemplaza su JAR en caliente. Hasta reiniciar el servidor de prueba con el artefacto nuevo, no se establece ENEMY ni se reanuda la Fase A.
+- **ACREDITADO EN JUEGO:** sin evidencia nueva en este ciclo. Los resultados runtime anteriores siguen limitados a arranque, ingreso y ensamblado; no hubo lanzamiento Radar Spear.
+- **ACREDITADO ESTÁTICAMENTE:** política UUID offline inspeccionada en el código descompilado fijado; compilación, regresiones y verificadores indicados por este ciclo.
+- **PENDIENTE:** reinicio seguro del servidor aislado, uso de `/cmi ships`, asignación owner real, comprobación `/cmi relation <uuid>` = ENEMY y toda la cadena de impacto Radar Spear. Ciclo 2E permanece abierto.
+
 ## Ciclo 2E: primera ejecución integrada (abierta)
 
 - Se añadió `RadarSpearDiagnostics`, con líneas `[CMI-RadarSpear]` que incluyen launch/effect abreviados, misil, perfil, objetivo y tiempo. `launch_rejected` solo se emite para una solicitud explícitamente gestionada; los lanzamientos nativos no producen estos registros.

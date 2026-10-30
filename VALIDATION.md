@@ -1,5 +1,31 @@
 # Validación realizada
 
+## Ciclo 2E.1 — asignación CMI de owner Sable y hostilidad por UUID
+
+### Inspección y comandos
+
+- HEAD de partida confirmado: `83d97789d26c90dc3cfc0992ab99a630ef531b70` (`main`). `/cmi claim` conserva su semántica actual de buscar un block entity en el mundo principal; no debe usarse sobre coordenadas locales de un plot después de ensamblar.
+- Se inspeccionó el código fijado de Better Targeting 1.0.0.1. `Iff.playerId(level, allegiance, uuid)` compara UUID y llama a `FtbCompat.teamFriend(owner, id)`; no consulta una instancia `Player` online. FTB usa `arePlayersInSameTeam(UUID, UUID)`, `getTeamForPlayerID(UUID)` y `isAlly(UUID)`. Así que un owner offline es válido en esta ruta. CMI conserva la prioridad: owner igual o aliado IFF/FTB produce FRIEND antes de consultar hostilidad explícita.
+- Procedimiento runtime tras reiniciar el servidor de prueba:
+  1. Ensamblar la nave; ejecutar `/cmi ships` y copiar el UUID que aparece para la Sable cargada.
+  2. Asignar el owner CMI con `/cmi shipowner <shipUuid> <ownerUuid>`. El UUID debe identificar al jugador que representa al dueño de la nave; puede estar offline. El comando rechaza una nave que no esté actualmente cargada y conserva el IFF CMI existente.
+  3. Desde el jugador tirador ejecutar `/cmi hostileuuid <ownerUuid> true`. Para retirar hostilidad usar `false`. Si FTB/IFF considera amigos al tirador y al owner, FRIEND sigue prevaleciendo.
+  4. Ejecutar `/cmi relation <shipUuid>` desde el tirador. Continuar solo si muestra `owner` esperado, `platform` igual al UUID Sable y `relation to you: ENEMY`. `unowned`, `NEUTRAL`, `FRIEND` o `UNKNOWN` bloquean la prueba ofensiva.
+  5. Configurar hardpoint y Ordinance Controller como antes, establecer `direct_sable` y seguir Fase A más abajo. No es necesario reclamar un cofre antes del ensamblado.
+- `/cmi ships` es de solo lectura. `/cmi relation` es de solo lectura. `/cmi shipowner` modifica únicamente `CmiData` de CMI. `/cmi hostileuuid` guarda el par de UUID con la API persistente existente. El comando `/cmi hostile <player> <enabled>` existente se conserva.
+
+### Estado de esta validación
+
+- El PID 6016 se verificó como el servidor aislado `CMI-Cycle-2E-Test`, ejecutado por su JDK bundled desde el directorio de ese perfil. Sigue activo y no hay consola de servidor accesible desde esta sesión. Se dejó intacto; no se forzó `kill`, no se reemplazó el JAR mientras estaba ejecutándose y no se tocó producción.
+- Por este motivo no se cargó el nuevo artefacto en runtime ni se reanudó Fase A. No se configuró una relación ENEMY y no hubo nuevas líneas `[CMI-RadarSpear]`. Se requiere detener normalmente y reiniciar manualmente el servidor aislado para que cargue el JAR recién construido.
+- `shipOwnershipRegression` cubre bind solo a UUID incluido en la lista de Sables actualmente cargados, persistencia `CmiData` NBT, `Actor.platform`, update del owner, preservación de IFF, rechazo de Sable ausente/owner nulo, hostilidad true/false, owner ausente => UNKNOWN, mismo owner => FRIEND y amigo IFF/FTB por encima de hostilidad. También comprueba estáticamente que `/cmi claim` conserva su consulta al mundo principal y que los nuevos comandos están registrados.
+- `clean build` con Java 21 y dependencias fijadas: **SUCCESS**. `check` ejecutó las nueve regresiones JavaExec y pasó, incluida `shipOwnershipRegression`.
+- Pasaron los ocho verificadores: `Verify-Artifact` (65 clases Java 21; 23 mixins registrados; sin clases/JAR de terceros empaquetados), `Verify-MixinTargets` (27 clases objetivo), `Verify-RadarSpearBytecode`, `Verify-RadarSpearArrowCollision`, `Verify-SableBytecode`, `Verify-Geometry`, `Verify-GuidanceBytecode` y `Verify-RadarSpearArea`.
+- SHA-256 del artefacto `build/libs/create-military-integration-0.1.0-dev.jar`: `CF00AA0E5E9B9249B508C0CF1264B2ACC615F440A764D80B2C4A0C0180F84AA3`.
+- **ACREDITADO EN JUEGO:** no hay evidencia runtime nueva para los comandos ni para Radar Spear.
+- **ACREDITADO ESTÁTICAMENTE:** API de IFF para UUID offline inspeccionada; build, nueve regresiones Java y ocho verificadores aprobados.
+- **PENDIENTE:** reiniciar el servidor de prueba, validar comandos con una Sable cargada, confirmar `relation=ENEMY` y ejecutar Fase A. El Ciclo 2E continúa abierto.
+
 ## Ciclo 2E — escenario y primera ejecución runtime
 
 ### Estado
@@ -17,13 +43,14 @@
 
 ### Preparación manual
 
-Usar el mundo dedicado `CMI-Cycle-2E-Test` con NeoForge 21.1.265, Create 6.0.10, Warium CE 1.0.4, Sable 2.0.6, FTB Teams/Chunks y las dependencias fijadas. Mantener al tirador y al blanco cerca para cargar chunks, fuera de claims FTB y colonias MineColonies. No subir pasajeros ni tripulación a la nave blanco. **Antes de repetir:** resolver cómo asignar una identidad de propietario al Sable sin depender de `/cmi claim` sobre un block entity ya dentro del plot y disponer de una segunda identidad/jugador para marcar hostilidad mediante el comando actual.
+Usar el mundo dedicado `CMI-Cycle-2E-Test` con NeoForge 21.1.265, Create 6.0.10, Warium CE 1.0.4, Sable 2.0.6, FTB Teams/Chunks y las dependencias fijadas. Mantener al tirador y al blanco cerca para cargar chunks, fuera de claims FTB y colonias MineColonies. No subir pasajeros ni tripulación a la nave blanco. Los comandos `/cmi ships`, `/cmi shipowner` y `/cmi hostileuuid` documentados en Ciclo 2E.1 resuelven la asignación de owner sin reclamar un block entity del plot.
 
-1. Crear una aeronave Sable pequeña, estacionaria y sin tripulantes. En la cara que recibirá el impacto, poner un único bloque `minecraft:stone` expuesto como superficie de colisión. Añadir un bloque entidad para identificar al propietario.
-2. Asignar/confirmar la propiedad mientras el bloque entidad todavía sea resoluble desde el nivel principal; después comprobar que Sable y CMI la conservan en el UUID del subnivel. La vía posterior al ensamblado no está disponible con el comando actual: `/cmi claim` llama a `ServerLevel.getBlockEntity`, y el intento en `34 142 10` devolvió `No block entity at position`. No declarar enemigo un Sable cuya propiedad no se haya confirmado. Para el caso positivo se necesitan tirador y dueño blanco distintos; `/cmi hostile` solo acepta un jugador online. El tirador ejecuta `/cmi hostile <jugador_blanco> true` después de validar que no sean aliados FTB.
-3. Colocar/cargar un Radar Spear Missile Hardpoint y un Ordinance Controller de Warium. Configurar el controlador para designar un punto dentro de la caja de la aeronave blanco. `HardpointTriggerTickProcedure` copia `TargetX/Y/Z` del controlador seleccionado al hardpoint; confirmar que la designación permanece válida y que la nave está cargada.
-4. El propietario del lanzador ejecuta `/cmi radarspearprofile <x> <y> <z> direct_sable` sobre el hardpoint. Cargar el misil según el montaje normal de Warium y disparar con el pulso que requiera ese hardpoint.
-5. Seguir `logs/latest.log` con `Select-String -Path logs/latest.log -Pattern '\[CMI-RadarSpear\]'`. Conservar el extracto y apuntar el bloque inicial/final; detener la prueba en el primer evento de rechazo o ausencia de evento esperado.
+1. Crear una aeronave Sable pequeña, estacionaria y sin tripulantes. En la cara que recibirá el impacto, poner un único bloque `minecraft:stone` expuesto como superficie de colisión.
+2. Ejecutar `/cmi ships`, copiar el UUID de la nave y asignar owner con `/cmi shipowner <shipUuid> <ownerUuid>`. Si el owner no está online, su UUID sigue siendo válido para IFF; el propietario y el tirador deben ser identidades distintas para el caso positivo.
+3. El tirador establece `/cmi hostileuuid <ownerUuid> true` y verifica `/cmi relation <shipUuid>`. Exigir owner, platform y `ENEMY`; no continuar si el resultado es friend, neutral, unknown o unowned.
+4. Colocar/cargar un Radar Spear Missile Hardpoint y un Ordinance Controller de Warium. Configurar el controlador para designar un punto dentro de la caja de la aeronave blanco. `HardpointTriggerTickProcedure` copia `TargetX/Y/Z` del controlador seleccionado al hardpoint; confirmar que la designación permanece válida y que la nave está cargada.
+5. El propietario del lanzador ejecuta `/cmi radarspearprofile <x> <y> <z> direct_sable` sobre el hardpoint. Cargar el misil según el montaje normal de Warium y disparar con el pulso que requiera ese hardpoint.
+6. Seguir `logs/latest.log` con `Select-String -Path logs/latest.log -Pattern '\[CMI-RadarSpear\]'`. Conservar el extracto y apuntar el bloque inicial/final; detener la prueba en el primer evento de rechazo o ausencia de evento esperado.
 
 ### Fase A — `direct_sable` (obligatoria antes de continuar)
 
