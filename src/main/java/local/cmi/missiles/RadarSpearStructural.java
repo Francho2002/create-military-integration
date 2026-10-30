@@ -40,7 +40,7 @@ public final class RadarSpearStructural {
         Actor actor = new Actor(data.getUUID("cmiOwner"), data.getString("cmiIff"),
                 data.hasUUID("cmiPlatform") ? data.getUUID("cmiPlatform") : null);
         TargetId target = new TargetId(TargetId.Kind.SABLE, data.getUUID("cmiTargetId"));
-        if (!RadarSpearImpact.matches(data, missile.getUUID(), level.getGameTime(), actor, target, false)) return false;
+        if (!RadarSpearImpact.matchesProfile(data, missile.getUUID(), level.getGameTime(), actor, target, "direct_sable")) return false;
         if (!(level.getPlayerByUUID(actor.owner()) instanceof net.minecraft.server.level.ServerPlayer owner) || !owner.isAlive()) return false;
         var container = SubLevelContainer.getContainer(level);
         var ship = container == null ? null : container.getSubLevel(target.uuid());

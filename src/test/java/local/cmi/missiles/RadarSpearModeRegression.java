@@ -12,6 +12,19 @@ public final class RadarSpearModeRegression {
         CompoundTag launcher = new CompoundTag();
         launcher.putBoolean("cmiManaged", true);
         require(RadarSpearMode.launchMode(launcher) == RadarSpearMode.LaunchMode.REQUESTED);
+        var shipTarget=new local.cmi.core.TargetId(local.cmi.core.TargetId.Kind.SABLE,java.util.UUID.randomUUID());
+        var livingTarget=new local.cmi.core.TargetId(local.cmi.core.TargetId.Kind.ENTITY,java.util.UUID.randomUUID());
+        require("direct_sable".equals(RadarSpearMode.launchProfile(launcher,shipTarget,false)));
+        require("direct_living_base".equals(RadarSpearMode.launchProfile(launcher,livingTarget,false)));
+        require("interceptor".equals(RadarSpearMode.launchProfile(launcher,livingTarget,true)));
+        launcher.putString("cmiRadarProfile","explosive_sable");
+        require("explosive_sable".equals(RadarSpearMode.launchProfile(launcher,shipTarget,false)));
+        require(RadarSpearMode.launchProfile(launcher,livingTarget,false)==null);
+        require(RadarSpearMode.launchProfile(launcher,shipTarget,true)==null);
+        launcher.putString("cmiRadarProfile","direct_sable");
+        require("direct_sable".equals(RadarSpearMode.launchProfile(launcher,shipTarget,false)));
+        launcher.putInt("cmiRadarProfile",1);
+        require(RadarSpearMode.launchProfile(launcher,shipTarget,false)==null);
         require(!RadarSpearMode.hasDesignation(launcher));
         launcher.putDouble("TargetX", 1); launcher.putDouble("TargetY", 2); launcher.putDouble("TargetZ", 3);
         require(RadarSpearMode.hasDesignation(launcher.copy()));
@@ -38,6 +51,8 @@ public final class RadarSpearModeRegression {
         require(bridge.contains("filter(c -> c.bounds().contains(point))"));
         require(bridge.contains("RadarSpearMode.managed(t) && !validManaged(level, missile)"));
         require(bridge.indexOf("RadarSpearImpact.arm(t, actor") < bridge.indexOf("t.putBoolean(\"cmiManaged\", true)"));
+        require(bridge.contains("RadarSpearMode.launchProfile(source, target.get().id(), target.get().projectile())"));
+        require(bridge.contains("RadarSpearAreaDamage.impact(level, missile, hit, from, to)"));
         String hook = java.nio.file.Files.readString(java.nio.file.Path.of("src/main/java/local/cmi/mixin/missiles/RadarSpearLaunchMixin.java"));
         require(hook.contains("ordinal = 3") && hook.contains("captureLaunch(server, projectile, pos)"));
         String entityHook = java.nio.file.Files.readString(java.nio.file.Path.of("src/main/java/local/cmi/mixin/missiles/RadarSpearEntityMixin.java"));

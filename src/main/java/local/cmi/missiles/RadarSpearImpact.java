@@ -9,7 +9,7 @@ import net.minecraft.nbt.Tag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 
-/** Persisted, one-shot authorization for the deliberately narrow managed impact profile. */
+/** Persisted, one-shot authorization for a single explicit managed impact profile. */
 public final class RadarSpearImpact {
     private static final String KEY = "cmiRadarImpact";
     private static final int VERSION = 1;
@@ -17,8 +17,15 @@ public final class RadarSpearImpact {
 
     /** Must be called at launch, before the missile is exposed to collisions. Never resets a context. */
     public static boolean arm(CompoundTag data, Actor actor, TargetId target, UUID missileId, long now, boolean interceptor) {
+        String profile = interceptor ? "interceptor"
+                : target != null && target.kind() == TargetId.Kind.SABLE ? "direct_sable" : "direct_living_base";
+        return arm(data, actor, target, missileId, now, profile);
+    }
+
+    /** Explicitly arms one profile; explosive Sable authority is never inferred from direct_sable. */
+    public static boolean arm(CompoundTag data, Actor actor, TargetId target, UUID missileId, long now, String profile) {
         if (data.contains(KEY) || actor == null || actor.owner() == null || target == null
-                || target.kind() == null || target.uuid() == null || (interceptor && target.kind() != TargetId.Kind.ENTITY)
+                || target.kind() == null || target.uuid() == null || !profileMatchesTarget(profile, target.kind())
                 || missileId == null || now < 0 || now > Long.MAX_VALUE - 130) return false;
         CompoundTag context = new CompoundTag();
         context.putInt("version", VERSION);
@@ -33,7 +40,7 @@ public final class RadarSpearImpact {
         if (actor.platform() != null) context.putUUID("platform", actor.platform());
         context.putUUID("target", target.uuid());
         context.putString("kind", target.kind().name());
-        context.putString("profile", interceptor ? "interceptor" : target.kind() == TargetId.Kind.SABLE ? "direct_sable" : "direct_living_base");
+        context.putString("profile", profile);
         context.putString("status", "active");
         data.put(KEY, context);
         return true;
@@ -52,33 +59,65 @@ public final class RadarSpearImpact {
                 || !c.contains("authorization", Tag.TAG_STRING) || !"designated_enemy".equals(c.getString("authorization"))
                 || !c.contains("iff", Tag.TAG_STRING) || !c.contains("kind", Tag.TAG_STRING)
                 || !c.contains("profile", Tag.TAG_STRING)
-                || !("direct_living_base".equals(c.getString("profile")) || "direct_sable".equals(c.getString("profile")) || "interceptor".equals(c.getString("profile")))
+                || !("direct_living_base".equals(c.getString("profile")) || "direct_sable".equals(c.getString("profile")) || "explosive_sable".equals(c.getString("profile")) || "interceptor".equals(c.getString("profile")))
                 || !c.contains("status", Tag.TAG_STRING) || !"active".equals(c.getString("status"))
                 || (c.contains("platform") && !c.hasUUID("platform"))) return false;
         String kind = c.getString("kind"), profile = c.getString("profile");
-        return ("SABLE".equals(kind) && "direct_sable".equals(profile))
+        return ("SABLE".equals(kind) && ("direct_sable".equals(profile) || "explosive_sable".equals(profile)))
                 || ("ENTITY".equals(kind) && ("direct_living_base".equals(profile) || "interceptor".equals(profile)));
+    }
+
+    private static boolean profileMatchesTarget(String profile, TargetId.Kind kind) {
+        return (kind == TargetId.Kind.SABLE && ("direct_sable".equals(profile) || "explosive_sable".equals(profile)))
+                || (kind == TargetId.Kind.ENTITY && ("direct_living_base".equals(profile) || "interceptor".equals(profile)));
     }
 
     /** Match mutable guidance against the captured authorization before using it. */
     public static boolean matches(CompoundTag data, UUID missileId, long now, Actor actor, TargetId target, boolean interceptor) {
         if (!valid(data, missileId, now) || actor == null || actor.owner() == null || target == null || target.kind() == null || target.uuid() == null) return false;
         CompoundTag c = data.getCompound(KEY);
-        return actor.owner().equals(c.getUUID("owner"))
-                && java.util.Objects.equals(actor.iff() == null ? "" : actor.iff(), c.getString("iff"))
-                && java.util.Objects.equals(actor.platform(), c.hasUUID("platform") ? c.getUUID("platform") : null)
-                && target.uuid().equals(c.getUUID("target")) && target.kind().name().equals(c.getString("kind"))
+        return identityMatches(c, actor, target)
                 && (interceptor ? "interceptor".equals(c.getString("profile"))
                     : target.kind() == TargetId.Kind.SABLE
                         ? "direct_sable".equals(c.getString("profile"))
                         : "direct_living_base".equals(c.getString("profile")));
     }
+
+    /** Identity check used during flight; it cannot authorize an impact effect. */
+    public static boolean matchesGuidance(CompoundTag data, UUID missileId, long now, Actor actor, TargetId target, boolean projectile) {
+        if (!valid(data, missileId, now) || actor == null || actor.owner() == null || target == null || target.kind() == null || target.uuid() == null) return false;
+        String profile = data.getCompound(KEY).getString("profile");
+        return identityMatches(data.getCompound(KEY), actor, target)
+                && (projectile ? "interceptor".equals(profile)
+                    : target.kind() == TargetId.Kind.SABLE
+                        ? ("direct_sable".equals(profile) || "explosive_sable".equals(profile))
+                        : "direct_living_base".equals(profile));
+    }
+
+    /** Exact mode-specific authorization. Call this at the effect site, not during target tracking. */
+    public static boolean matchesProfile(CompoundTag data, UUID missileId, long now, Actor actor, TargetId target, String profile) {
+        if (!valid(data, missileId, now) || actor == null || actor.owner() == null || target == null || target.kind() == null || target.uuid() == null
+                || !profileMatchesTarget(profile, target.kind())) return false;
+        CompoundTag c = data.getCompound(KEY);
+        return identityMatches(c, actor, target) && profile.equals(c.getString("profile"));
+    }
+
+    private static boolean identityMatches(CompoundTag c, Actor actor, TargetId target) {
+        return actor.owner().equals(c.getUUID("owner"))
+                && java.util.Objects.equals(actor.iff() == null ? "" : actor.iff(), c.getString("iff"))
+                && java.util.Objects.equals(actor.platform(), c.hasUUID("platform") ? c.getUUID("platform") : null)
+                && target.uuid().equals(c.getUUID("target")) && target.kind().name().equals(c.getString("kind"));
+    }
     public static boolean matches(CompoundTag data, UUID missileId, long now, Actor actor, TargetId target) {
-        return matches(data, missileId, now, actor, target, interceptor(data, missileId, now));
+        return matchesGuidance(data, missileId, now, actor, target, interceptor(data, missileId, now));
     }
 
     public static boolean interceptor(CompoundTag data, UUID missileId, long now) {
         return valid(data, missileId, now) && "interceptor".equals(data.getCompound(KEY).getString("profile"));
+    }
+
+    public static String profile(CompoundTag data, UUID missileId, long now) {
+        return valid(data, missileId, now) ? data.getCompound(KEY).getString("profile") : "";
     }
     /** Consume even on a miss or rejected authorization; never re-arm on a repeated callback. */
     public static boolean consume(CompoundTag data, UUID missileId, long now) {

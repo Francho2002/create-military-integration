@@ -36,7 +36,8 @@ public final class RadarSpearBridge {
         var target = CombatServices.contacts(level).stream().filter(c -> c.bounds().contains(point))
                 .min(Comparator.comparingDouble(c -> c.position().distanceToSqr(point)));
         if (target.isEmpty() || !CombatServices.canEngage(level, actor, target.get())) return false;
-        if (!RadarSpearImpact.arm(t, actor, target.get().id(), missile.getUUID(), level.getGameTime(), target.get().projectile())) return false;
+        String profile = RadarSpearMode.launchProfile(source, target.get().id(), target.get().projectile());
+        if (profile == null || !RadarSpearImpact.arm(t, actor, target.get().id(), missile.getUUID(), level.getGameTime(), profile)) return false;
         t.putDouble("LX", pos.getX()); t.putDouble("LY", pos.getY()); t.putDouble("LZ", pos.getZ());
         t.putUUID("cmiOwner", actor.owner());
         t.putString("cmiIff", actor.iff() == null ? "" : actor.iff());
@@ -58,7 +59,7 @@ public final class RadarSpearBridge {
             var id = new TargetId(TargetId.Kind.valueOf(t.getString("cmiTargetKind")), t.getUUID("cmiTargetId"));
             var actor = new Actor(t.getUUID("cmiOwner"), t.getString("cmiIff"), t.hasUUID("cmiPlatform") ? t.getUUID("cmiPlatform") : null);
             return CombatServices.resolve(level, id).filter(target -> CombatServices.canEngage(level, actor, target)
-                    && RadarSpearImpact.matches(t, missile.getUUID(), level.getGameTime(), actor, id, target.projectile())).isPresent();
+                    && RadarSpearImpact.matchesGuidance(t, missile.getUUID(), level.getGameTime(), actor, id, target.projectile())).isPresent();
         } catch (IllegalArgumentException invalidKind) { return false; }
     }
     /** Cancel the native arrow damage and explosion; only a designated hostile projectile may be neutralized. */
@@ -87,7 +88,10 @@ public final class RadarSpearBridge {
     /** The native callback provides the actual block collision; native Warium detonation remains cancelled. */
     public static void impactBlock(ServerLevel level, Entity missile, BlockHitResult hit) {
         Vec3 from = missile.position();
-        RadarSpearStructural.impact(level, missile, hit, from, from.add(missile.getDeltaMovement()));
+        Vec3 to = from.add(missile.getDeltaMovement());
+        String profile = RadarSpearImpact.profile(missile.getPersistentData(), missile.getUUID(), level.getGameTime());
+        if ("direct_sable".equals(profile)) RadarSpearStructural.impact(level, missile, hit, from, to);
+        else if ("explosive_sable".equals(profile)) RadarSpearAreaDamage.impact(level, missile, hit, from, to);
         discard(missile);
     }
     private static boolean allowedPath(ServerLevel level, Actor actor, Entity missile, Vec3 from, Vec3 to) {

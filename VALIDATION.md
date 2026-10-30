@@ -1,5 +1,14 @@
 # Validación realizada
 
+## Ciclo 2D — perfil de área estructural Radar Spear
+
+- Confirmado el HEAD base `acb6e2f173598d0646e1be15f5e6d763fa4ea277`. Se preservaron sin tocar los archivos locales no seguidos `tools/cycle2d.init.gradle` y `tools/cycle2d/`; no se ejecutó ninguna tarea `run*`, servidor o GameTest.
+- Se verificó Warium CE 1.0.4 del perfil cliente y servidor: ambos JAR tienen SHA-256 `AA0DD2FA8B5C8C2B4FFF40B4FE2189D94BC9D07240F43A5E6AF95D109B39E27E`. `Verify-RadarSpearArea.ps1` contrasta descriptores de `TankFireProjectileHitsBlockProcedure`, `SmallExplosionProcedure` y `HeavyCrackProcedureProcedure`, además de rutas nativas y ausencia de llamadas explosivas/diferidas en el handler CMI.
+- `clean build` con Java 21, Gradle fijado y dependencias verificadas terminó correctamente. `check` ejecutó ocho suites JavaExec: las siete existentes más `radarSpearBlastGeometryRegression`. Se ampliaron las regresiones de autorización NBT y selección de perfil; la nueva prueba comprueba una pose rotada con escala, límites del radio en mundo, bloques a ambos lados de una frontera de chunk y rechazo de entradas inválidas.
+- Pasaron `Verify-Artifact.ps1`, `Verify-MixinTargets.ps1`, `Verify-RadarSpearBytecode.ps1`, `Verify-RadarSpearArrowCollision.ps1`, `Verify-SableBytecode.ps1`, `Verify-Geometry.ps1`, `Verify-GuidanceBytecode.ps1` y `Verify-RadarSpearArea.ps1` contra los JAR locales fijados. No se añadieron mixins nuevos; el perfil selecciona la ruta desde el callback ya existente.
+- El bytecode demuestra que el impacto Warium llama `TankFireProjectileHitsBlockProcedure`, que difiere 25 proyectiles y `SmallExplosionProcedure`; este último llama `Level.explode` con fuerza 3/TNT y 7/NONE (con una llamada TNT adicional en agua) y crea 75 proyectiles HV. El código CMI del perfil explosivo no llama a esos procedimientos ni a `Level.explode`, y solo incluye `LevelPlot.toLocal/getChunk`, `Level.setBlock(...,3)` y `Level.destroyBlock(...,false)` tras comprobaciones y evento de rotura.
+- La geometría aislada y el análisis de bytecode no ejecutan `AbstractArrow.tick`, `BlockGetterMixin.clip`, Sable, chunks, listeners, FTB, MineColonies, IFF vivo ni actualizaciones físicas. La aplicación/prioridad de mixins, el hecho de que la colisión alcance el callback en una aeronave móvil/rotada, la magnitud visual del radio, la degradación real de bloques en plot, crew/territorio y las reacciones físicas tras daño siguen **PENDIENTES DE VALIDACIÓN EN JUEGO**. No se declara equivalencia con la explosión Warium.
+
 ## Ciclo 2C.1
 
 - `clean build` con Java 21 y dependencias fijadas, y las siete regresiones JavaExec: perfiles y contextos NBT, geometría y pose rotada, identidad/cara/bloque del callback, tolerancia y orden de intersecciones aisladas.

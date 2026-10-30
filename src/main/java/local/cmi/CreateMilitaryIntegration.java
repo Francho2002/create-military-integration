@@ -49,6 +49,16 @@ public final class CreateMilitaryIntegration {
                 if(!(be instanceof riftyboi.cbcmodernwarfare.munitions.munitions_contraption_launcher.guidance.infrared_homing.InfraredSeekerGuidanceBlockEntity)&&!(be instanceof rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity)&&!(be instanceof riftyboi.cbcmodernwarfare.cannon_control.compact_mount.CompactCannonMountBlockEntity))return 0;
                 be.getPersistentData().putBoolean("cmiInterceptor",BoolArgumentType.getBool(ctx,"enabled"));be.getPersistentData().putUUID("cmiOwner",s.getPlayerOrException().getUUID());be.setChanged();s.sendSuccess(()->Component.literal("CMI interceptor mode set on seeker; preserve its NBT when loading"),false);return 1;
             }))))
+            .then(Commands.literal("radarspearprofile").then(Commands.argument("pos",BlockPosArgument.blockPos()).then(Commands.argument("profile",StringArgumentType.word()).executes(ctx->{
+                var s=ctx.getSource();var p=BlockPosArgument.getLoadedBlockPos(ctx,"pos");var be=s.getLevel().getBlockEntity(p);
+                if(!(be instanceof com.wariumce.block.entity.RadarSpearMissileHardpointBlockEntity))return 0;
+                String profile=StringArgumentType.getString(ctx,"profile");
+                if(!"direct_sable".equals(profile)&&!"explosive_sable".equals(profile))return 0;
+                var player=s.getPlayerOrException();var current=CombatServices.actor(s.getLevel(),p);
+                if(current.owner()!=null&&!current.owner().equals(player.getUUID())){s.sendFailure(Component.literal("Reclaim this hardpoint with /cmi claim first."));return 0;}
+                var data=be.getPersistentData();data.putBoolean("cmiManaged",true);data.putUUID("cmiOwner",player.getUUID());data.putString("cmiRadarProfile",profile);be.setChanged();
+                s.sendSuccess(()->Component.literal("Radar Spear profile set to "+profile+". explosive_sable is a CMI-only, block-structural area effect; Warium's fragments and native explosions stay disabled for this managed launch."),false);return 1;
+            }))))
             .then(Commands.literal("managed").then(Commands.argument("pos",BlockPosArgument.blockPos()).then(Commands.argument("enabled",BoolArgumentType.bool()).executes(ctx->{
                 var s=ctx.getSource();var p=BlockPosArgument.getLoadedBlockPos(ctx,"pos");var be=s.getLevel().getBlockEntity(p);if(be==null)return 0;
                 be.getPersistentData().putBoolean("cmiManaged",BoolArgumentType.getBool(ctx,"enabled"));be.getPersistentData().putUUID("cmiOwner",s.getPlayerOrException().getUUID());be.setChanged();s.sendSuccess(()->Component.literal("CMI managed launcher flag updated; native Radar Spear coordinate contract remains required"),false);return 1;

@@ -1,5 +1,6 @@
 package local.cmi.missiles;
 
+import local.cmi.core.TargetId;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
 
@@ -20,5 +21,23 @@ public final class RadarSpearMode {
             if (!source.contains(key, 99) || !Double.isFinite(source.getDouble(key))) return false;
         }
         return true;
+    }
+
+    /** Resolve a launcher's optional explicit warhead profile without changing legacy defaults. */
+    public static String launchProfile(CompoundTag source, TargetId target, boolean projectile) {
+        if (source == null || target == null || target.kind() == null || target.uuid() == null) return null;
+        if (!source.contains("cmiRadarProfile")) {
+            if (projectile) return target.kind() == TargetId.Kind.ENTITY ? "interceptor" : null;
+            return target.kind() == TargetId.Kind.SABLE ? "direct_sable" : "direct_living_base";
+        }
+        if (!source.contains("cmiRadarProfile", Tag.TAG_STRING)) return null;
+        String profile = source.getString("cmiRadarProfile");
+        boolean compatible = switch (profile) {
+            case "direct_sable", "explosive_sable" -> !projectile && target.kind() == TargetId.Kind.SABLE;
+            case "direct_living_base" -> !projectile && target.kind() == TargetId.Kind.ENTITY;
+            case "interceptor" -> projectile && target.kind() == TargetId.Kind.ENTITY;
+            default -> false;
+        };
+        return compatible ? profile : null;
     }
 }

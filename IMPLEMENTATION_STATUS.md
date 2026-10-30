@@ -2,12 +2,49 @@
 
 Esta tabla describe el código, no una prueba dentro de Minecraft. Compilación no demuestra aplicación correcta de mixins.
 
+## Ciclo 2D: ojiva estructural de área Radar Spear
+
+### Ruta nativa examinada
+
+- JAR cliente/servidor `wariumce-1.0.4.jar`, SHA-256 `AA0DD2FA8B5C8C2B4FFF40B4FE2189D94BC9D07240F43A5E6AF95D109B39E27E`.
+- `RadarSpearMissileProjectileEntity.onHitBlock/onHitEntity` llama primero a `AbstractArrow` y después a `TankFireProjectileHitsBlockProcedure.execute`. En un proyectil no gestionado, `RadarSpearFlightProcedure.execute` también inicia ese procedimiento al exceder el tiempo, tocar agua, acercarse a entidades `wariumce:warm` o detectar la etiqueta `wariumce:bullet`; la rama bullet/warm puede diferir un tick.
+- `TankFireProjectileHitsBlockProcedure` ejecuta `DamagesProcedure` y `HeavyCrackProcedureProcedure` sincrónicamente y programa, un tick después, 25 proyectiles `HVParticleProjectileEntity` con daño base 5, knockback 1, crítico, velocidad 4 e inexactitud 22; después llama a `SmallExplosionProcedure` y descarta el misil. Esos proyectiles conservan el movimiento del misil, pero esta ruta no fija su propietario CMI.
+- `SmallExplosionProcedure` endurece dirt dentro de un volumen discreto X/Z de -6 a +5 y Y de -3 a -2 si hay un bloque no aire encima. En seco crea un efecto cliente y llama a una explosión vanilla de fuerza 3/TNT y otra de fuerza 7/NONE; en líquido añade una segunda explosión 3/TNT y un proyectil de efecto de agua. Produce flash/sonidos y 75 proyectiles HV adicionales (daño base 0, knockback 3, pierce 2, velocidad 1–1.2, inexactitud 45). El procedimiento de impacto de HV tiene lógica de daño propia, así que esos proyectiles no se consideran visuales inocuos.
+- `HeavyCrackProcedureProcedure` tiene conversiones escalonadas de concreto y muros, degradación de piedra, ladrillos, pizarra y piedra negra, destruye obsidiana/obsidiana llorosa, y delega bloques etiquetados `wariumce:era` a `ERAProcedureProcedure`. Esa ruta ERA puede degradar/destruir ERA y metal adyacente y llama explosiones/procedimientos secundarios.
+- `DamagesProcedure` incluye daños especiales a motores/tanques/tambores de munición y trabajos diferidos que pueden invocar `MicroExplosionProcedure` en +20, +40 y +50 ticks. Las colas guardan mundo/coordenadas sin el contexto de autorización CMI.
+
+### Implementación CMI
+
+- Se añadió el perfil independiente `explosive_sable`. Solo `/cmi radarspearprofile <pos> explosive_sable` lo configura en un `RadarSpearMissileHardpointBlockEntity`; el comando lo marca gestionado y asigna al emisor. `direct_sable` sigue siendo un único impacto puntual. Si el perfil no existe, los lanzadores gestionados conservan el comportamiento previo; un perfil malformado o incompatible bloquea el lanzamiento. `interceptor`, `direct_living_base`, `direct_sable` y `explosive_sable` no se convierten entre sí.
+- `RadarSpearBridge.impactBlock` envía exclusivamente `explosive_sable` a `RadarSpearAreaDamage`. El handler solo se llama desde el callback nativo real `onHitBlock`; la predicción/preflight no detona. `RadarSpearEntityMixin` y `RadarSpearFlightMixin` continúan suprimiendo las rutas nativas para misiles gestionados. Misiles no gestionados siguen en Warium.
+- El radio geométrico de 3 bloques mundiales es una **envolvente CMI** tomada del valor 3.0/TNT que Warium pasa a `Level.explode`; no se presenta como radio exacto de la explosión vanilla. El adaptador transforma esa esfera al plot con la pose actual, examina formas de colisión transformadas (incluidas naves rotadas/escaladas) mediante `LevelPlot.getEmbeddedLevelAccessor`, limita celdas y operaciones, exige exposición por línea de vista dentro del plot, y lee chunks mediante `LevelPlot.toLocal/getChunk`. Los vecinos de las formas deben estar disponibles; chunks ausentes invalidan la detonación. Solo examina y modifica el plot/UUID designado; no escribe en las coordenadas de mundo que casualmente coincidan con el plot.
+- El daño de área es una **adaptación CMI** de las conversiones explícitas de `HeavyCrackProcedureProcedure`, una degradación por bloque y por detonación. Solo procede con al menos dos bloques elegibles. Incluye los escalones conocidos de piedra/concreto/muros y la destrucción de obsidianas definida allí. Los bloques con block entity, desconocidos, ERA/blindajes sin ruta segura, obstáculos, posiciones sin chunk disponible y bloques protegidos quedan intactos. Cada bloque se revalida individualmente frente a FTB Chunks, MineColonies, propietario/IFF y objetivo actual; los tripulantes conocidos desconocidos, amigos o neutrales bloquean el efecto. El efecto usa `CommonHooks.fireBlockBreak`, `Level.setBlock(..., 3)` y `Level.destroyBlock(..., false)`, conservando actualizaciones normales de Minecraft/Sable.
+- CMI consume el permiso antes de llamar listeners; cada modificación vuelve a comprobar contexto, pose, dueño, hostilidad, crew, chunk, estado y protección. La llamada no crea tareas diferidas y no invoca `Level.explode`, `TankFireProjectileHitsBlockProcedure`, `SmallExplosionProcedure`, `DamagesProcedure`, ERA, fragmentos ni entidades nuevas.
+- **Sin implementación en este ciclo:** daño por explosión a entidades, fragmentación, hardening del área de dirt, ERA, daño especial de motores/tanques, explosiones diferidas, fuerza física y efectos visuales Warium. No hay fuerza explosiva Sable añadida. La ojiva estructural solo altera estados que aparecen en el mapa de HeavyCrack; los bloques no mapeados permanecen intactos.
+
+### Estado
+
+| Capacidad | Estado |
+|---|---|
+| Guiado Radar Spear | IMPLEMENTADO; PENDIENTE DE VALIDACIÓN EN JUEGO |
+| Impacto puntual Sable (`direct_sable`) | IMPLEMENTADO; PENDIENTE DE VALIDACIÓN EN JUEGO |
+| Ojiva estructural de área (`explosive_sable`) | IMPLEMENTADO en código acotado; PENDIENTE DE VALIDACIÓN EN JUEGO |
+| Daño explosivo a entidades | BLOQUEADO; no se reproduce para evitar daño a aliados/terceros |
+| Fragmentación | BLOQUEADO; rutas nativas diferidas carecen de procedencia y afectan entidades |
+| ERA | BLOQUEADO; su procedimiento causa destrucción adyacente y explosiones secundarias |
+| Efectos diferidos | BLOQUEADO/suprimidos para la ruta gestionada |
+| Fuerzas Sable | BLOQUEADO/no añadidas; no se encontró una fuerza Warium/Sable atribuible y acotable |
+| Efectos visuales | BLOQUEADO/no reproducidos; el procedimiento original también crea proyectiles con daño |
+| Radar Spear nativo | IMPLEMENTADO sin intervención de CMI cuando no está gestionado |
+
+La implementación y regresiones estáticas demuestran la selección del perfil, los límites geométricos y las rutas de escritura del código; **no demuestran que los mixins se apliquen ni que un impacto dañe una nave dentro de Minecraft**. Las actualizaciones físicas que Sable active tras cada cambio y sus consecuencias indirectas siguen pendientes de validación en juego.
+
 ## Ciclo 2C.1: callback y perfiles estrictos
 
 - En `AbstractArrow.tick`, el resultado de `Level.clip` se guarda como impacto de bloque, se consulta `HitResult.getLocation` y el punto devuelto se usa como extremo de `findHitEntity`. Si esta encuentra una entidad, sustituye el impacto de bloque. Sable puede devolver un resultado de casco cuya ubicación y `BlockPos` pertenecen al plot, mientras el inicio del rayo de entidades está en el mundo.
 - `RadarSpearArrowCollisionMixin` envuelve exclusivamente esa llamada a `getLocation`: para un Radar Spear gestionado del servidor, identifica un plot cargado y convierte su punto a mundo para la búsqueda de entidades. Conserva el `BlockHitResult` original para el callback y la búsqueda nativa de entidades. En un misil nativo devuelve el resultado original; un plot ambiguo cancela y descarta el misil gestionado. Si otra integración ya alteró el punto, no intenta transformarlo otra vez.
 - `RadarSpearCollisionCoordinates` distingue punto de mundo y de plot y verifica que el punto de plot pertenezca al bloque; la pose se copia antes de transformar. `SableFirstHit.Result` conserva punto mundial, punto y bloque de plot, nave, cara, estado, tick y copia de pose. `RadarSpearStructural` vuelve a confirmar la identidad, el tick y la pose antes del evento y antes de cambiar el bloque. La coincidencia espacial tolera hasta 1e-5 bloques tanto en mundo como en plot, además de exigir idénticos UUID, bloque y cara; empates de primer impacto dentro de esa distancia se rechazan.
-- `RadarSpearImpact` exige `direct_sable` para Sable, `direct_living_base` para entidad y `interceptor` para proyectil de tipo entidad; las rutas de efecto además comprueban el tipo real del blanco. Los contextos Sable anteriores con perfil de entidad se rechazan, no se migran. Se mantienen las tres sustituciones puntuales de 2C, IFF, la protección y el consumo único.
+- `RadarSpearImpact` ahora exige un perfil exacto en cada sitio de efecto: `direct_sable` (impacto puntual), `explosive_sable` (solo área estructural), `direct_living_base` o `interceptor`. El seguimiento puede conservar cualquiera de los perfiles válidos de Sable, pero no autoriza por sí mismo ningún efecto. Los contextos antiguos `direct_sable` no reciben permiso explosivo.
 - **No acreditado en ejecución:** que la pose no cambie entre el `clip` nativo de Sable y el wrapper, la aplicación real y prioridad de los mixins, ni las interacciones con otros mods. Las pruebas geométricas aisladas y el análisis del bytecode no equivalen a una colisión observada en el juego.
 
 ## Ciclo 2C: impacto estructural Sable
