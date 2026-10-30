@@ -47,7 +47,8 @@ public final class RadarSpearModeRegression {
         managed.remove("cmiManaged");
         require(RadarSpearMode.managed(managed));
         String bridge = java.nio.file.Files.readString(java.nio.file.Path.of("src/main/java/local/cmi/missiles/RadarSpearBridge.java"));
-        require(bridge.contains("if (target.isEmpty() || !CombatServices.canEngage(level, actor, target.get())) return false"));
+        require(bridge.contains("if (target.isEmpty() || !CombatServices.canEngage(level, actor, target.get())) {"));
+        require(bridge.contains("target_not_engageable"));
         require(bridge.contains("filter(c -> c.bounds().contains(point))"));
         require(bridge.contains("RadarSpearMode.managed(t) && !validManaged(level, missile)"));
         require(bridge.indexOf("RadarSpearImpact.arm(t, actor") < bridge.indexOf("t.putBoolean(\"cmiManaged\", true)"));

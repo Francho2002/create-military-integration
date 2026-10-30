@@ -18,7 +18,10 @@ public abstract class RadarSpearEntityMixin {
         Entity self = (Entity) (Object) this;
         if (self.level() instanceof ServerLevel server) {
             RadarSpearBridge.initialize(server, self);
-            if (!self.isRemoved() && RadarSpearMode.managed(self.getPersistentData()) && !RadarSpearBridge.preflight(server, self)) RadarSpearBridge.discard(self);
+            if (!self.isRemoved() && RadarSpearMode.managed(self.getPersistentData()) && !RadarSpearBridge.preflight(server, self)) {
+                local.cmi.missiles.RadarSpearDiagnostics.event(self, "preflight_rejected", "reason=unsafe_or_unresolved_path");
+                RadarSpearBridge.discard(self);
+            }
             if (self.isRemoved()) ci.cancel();
         }
     }
@@ -26,6 +29,7 @@ public abstract class RadarSpearEntityMixin {
     private void cmi$avoidNativeEntityExplosion(EntityHitResult hit, CallbackInfo ci) {
         Entity self = (Entity) (Object) this;
         if (self.level() instanceof ServerLevel server && RadarSpearMode.managed(self.getPersistentData())) {
+            local.cmi.missiles.RadarSpearDiagnostics.event(self, "on_hit_entity", "entity=" + hit.getEntity().getUUID().toString().substring(0,8));
             ci.cancel();
             RadarSpearBridge.impactEntity(server, self, hit.getEntity());
         }

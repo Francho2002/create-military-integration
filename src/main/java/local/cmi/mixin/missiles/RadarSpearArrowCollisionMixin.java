@@ -7,6 +7,7 @@ import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import local.cmi.missiles.RadarSpearMode;
 import local.cmi.missiles.RadarSpearBridge;
 import local.cmi.missiles.RadarSpearCollisionCoordinates;
+import local.cmi.missiles.RadarSpearDiagnostics;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.projectile.AbstractArrow;
 import net.minecraft.world.level.ChunkPos;
@@ -28,7 +29,15 @@ public abstract class RadarSpearArrowCollisionMixin {
         AbstractArrow self = (AbstractArrow) (Object) this;
         if (!cmi$managed(self)) return location;
         Vec3 world = cmi$worldEnd((ServerLevel) self.level(), result, location);
-        if (world == null) { RadarSpearBridge.discard(self); return location; }
+        if (world == null) {
+            RadarSpearDiagnostics.event(self, "arrow_collision_world_endpoint", "status=unresolved result=" + result.getType()
+                    + " location=" + RadarSpearDiagnostics.vec(location)
+                    + (result instanceof BlockHitResult block ? " block=" + block.getBlockPos() : ""));
+            RadarSpearBridge.discard(self); return location;
+        }
+        RadarSpearDiagnostics.event(self, "arrow_collision_world_endpoint", "status=resolved result=" + result.getType()
+                + " local=" + RadarSpearDiagnostics.vec(location) + " world=" + RadarSpearDiagnostics.vec(world)
+                + (result instanceof BlockHitResult block ? " block=" + block.getBlockPos() : ""));
         return world;
     }
 

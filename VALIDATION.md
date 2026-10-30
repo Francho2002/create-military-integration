@@ -1,5 +1,53 @@
 # Validación realizada
 
+## Ciclo 2E — escenario reproducible para ejecución manual
+
+### Estado
+
+- HEAD inicial: `61398fd480169495cdd353b2968feae6d7159a6b` (`main`). El escenario usa el modpack actual fijado por el proyecto; no se modificaron perfiles, servidor, mundos ni JAR de terceros.
+- Se añadieron logs de servidor de baja frecuencia en `RadarSpearDiagnostics`. Sus prefijos `[CMI-RadarSpear]` aparecen solo en la ruta CMI gestionada; los lanzamientos nativos no se instrumentan. Los estados de contacto/primer obstáculo se registran cuando cambian, no cada tick.
+- El escenario y la lista de observaciones están preparados, pero requieren que el usuario inicie manualmente un mundo de prueba. **No se inició Minecraft, servidor ni GameTest. Ningún punto de la cadena está acreditado en juego.**
+- El artefacto que se debe instalar manualmente en el perfil de prueba, después de decidir iniciar ese mundo, es `build/libs/create-military-integration-0.1.0-dev.jar`.
+
+### Preparación manual
+
+Usar un mundo de prueba dedicado con el perfil que ya tiene NeoForge 21.1.265, Create 6.0.10, Warium CE 1.0.4, Sable 2.0.6, FTB Teams/Chunks y las dependencias fijadas; instalar el JAR CMI que se compile en este ciclo en el perfil de prueba. Mantener al tirador y al blanco cerca para cargar chunks, fuera de claims FTB y colonias MineColonies. No subir pasajeros ni tripulación a la nave blanco.
+
+1. Crear una aeronave Sable pequeña, estacionaria y sin tripulantes. En la cara que recibirá el impacto, poner un único bloque `minecraft:stone` expuesto como superficie de colisión. Añadir un bloque con entidad (por ejemplo, un cofre) en la nave para poder asignar su dueño con `/cmi claim`.
+2. El dueño de la nave blanco ejecuta `/cmi claim <x> <y> <z>` apuntando al cofre de esa Sable. El tirador y el dueño blanco no deben ser aliados para el caso positivo; el tirador ejecuta `/cmi hostile <jugador_blanco> true`.
+3. Colocar/cargar un Radar Spear Missile Hardpoint y un Ordinance Controller de Warium. Configurar el controlador para designar un punto dentro de la caja de la aeronave blanco. `HardpointTriggerTickProcedure` copia `TargetX/Y/Z` del controlador seleccionado al hardpoint; confirmar que la designación permanece válida y que la nave está cargada.
+4. El propietario del lanzador ejecuta `/cmi radarspearprofile <x> <y> <z> direct_sable` sobre el hardpoint. Cargar el misil según el montaje normal de Warium y disparar con el pulso que requiera ese hardpoint.
+5. Seguir `logs/latest.log` con `Select-String -Path logs/latest.log -Pattern '\[CMI-RadarSpear\]'`. Conservar el extracto y apuntar el bloque inicial/final; detener la prueba en el primer evento de rechazo o ausencia de evento esperado.
+
+### Fase A — `direct_sable` (obligatoria antes de continuar)
+
+Orden esperado para un impacto válido: `launch_captured` → `impact_armed` → `guidance_active` → `guidance_target_acquired` → transición `sable_first_hit` a `TARGET` → `arrow_collision_world_endpoint status=resolved` → `on_hit_block native_warium_cancelled=true` → `direct_sable_begin` → `impact_confirmed` → `impact_consumed` → un `block_changed` (`minecraft:stone` a `minecraft:cobblestone`, count=1) → `missile_discarded`.
+
+Comparar en el registro `arrow_collision_world_endpoint` (local y mundial), `sable_first_hit` (UUID abreviado, world, plot, bloque y cara), `on_hit_block` y `impact_confirmed`. Deben coincidir la nave, bloque plot y cara; el punto mundial/plot debe corresponder a la pose estacionaria. Comprobar que cambió únicamente el bloque frontal previsto, que el misil desapareció y que durante los siguientes 60 ticks no aparecen blast, cráter, proyectiles HV ni efectos diferidos Warium. Si falla cualquier paso, no configurar `explosive_sable`; guardar log/captura y detenerse.
+
+### Fase B — `explosive_sable` (solo si A completa toda la cadena)
+
+Ampliar la cara de prueba con al menos dos bloques elegibles expuestos dentro de 3 bloques mundiales, usando `stone`, `stone_bricks` y/o hormigón reforzado Warium. Dejar el entorno fuera de claims/colonias, sin pasajeros y sin otros Sables dentro de la envolvente. Restaurar el hardpoint y ejecutar `/cmi radarspearprofile <x> <y> <z> explosive_sable`; volver a designar el interior de la nave y disparar.
+
+Exigir `impact_confirmed` con el Sable correcto, `area_candidates` con más de un elegible, `area_approved` con al menos dos aprobados, al menos dos `block_changed` distintos (una modificación por bloque) y `missile_discarded`. Observar el impacto y los 60 ticks siguientes: no debe haber explosión vanilla destructiva, fragmentos HV ni efecto Warium diferido. Si el registro se separa de la fase A en `area_candidates`, `area_approved` o revalidación, guardar el primer rechazo y detener la prueba.
+
+### Fase C — nave rotada y caso negativo
+
+- Repetir primero `direct_sable` con la nave blanco rotada y estacionaria. El callback mundial debe coincidir con el bloque/cara local del plot después de aplicar la pose; comprobar que el bloque equivalente del terreno principal no cambia. Solo después puede repetirse el perfil de área.
+- Para el negativo, poner tirador y dueño blanco en el mismo equipo de FTB Teams e intentar otro lanzamiento al mismo blanco. Debe rechazarse como no atacable, no crearse un misil gestionado y no cambiarse ningún bloque. Conservar la línea `launch_rejected` y confirmar el estado previo/posterior del casco.
+
+### Instrumentación añadida y límites
+
+- Los eventos incluyen `launch_rejected`, `launch_captured`, `impact_armed`, `guidance_active`, cambios de contacto/primer obstáculo, `arrow_collision_world_endpoint`, `on_hit_block`, comienzos `direct_sable`/`explosive_sable`, `impact_confirmed`, `area_candidates`, `area_approved`, `impact_consumed`, `block_changed`, rechazos por fase y `missile_discarded`.
+- La línea `native_warium_cancelled=true` acredita que CMI interceptó la entrada al callback; la ausencia de explosión/fragments debe observarse durante la ejecución y no se infiere solo del log.
+- Compilar y verificar estáticamente no demuestra que mixins hayan tejido ni que la nave reciba daño. La validación integrada queda **PENDIENTE DE AUTORIZACIÓN Y EJECUCIÓN MANUAL**.
+
+### Validación estática de Ciclo 2E
+
+- `clean build` con Java 21 y dependencias fijadas terminó en `BUILD SUCCESSFUL`; las ocho regresiones Java pasaron. Se actualizó la comprobación fuente de `radarSpearModeRegression` para admitir el rechazo gestionado con diagnóstico.
+- Pasaron los ocho verificadores: `Verify-Artifact.ps1` (63 clases Java 21, 22 mixins), `Verify-MixinTargets.ps1` (26 clases objetivo), `Verify-RadarSpearBytecode.ps1`, `Verify-RadarSpearArrowCollision.ps1`, `Verify-SableBytecode.ps1`, `Verify-Geometry.ps1`, `Verify-GuidanceBytecode.ps1` y `Verify-RadarSpearArea.ps1`.
+- Los verificadores comprueban estructura, referencias y bytecode fijado. No se aplicaron mixins en juego ni se evaluaron los resultados observables de las fases A-C.
+
 ## Ciclo 2D.1 — cardinalidad X/Y/Z y límites del área
 
 - Confirmado el HEAD de partida `1dca4fb914cd387a32897fc6db172b71f0cc525c`; se preservaron los archivos locales no seguidos `tools/cycle2d.init.gradle` y `tools/cycle2d/`.

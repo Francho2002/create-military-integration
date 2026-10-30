@@ -2,6 +2,15 @@
 
 Esta tabla describe el código, no una prueba dentro de Minecraft. Compilación no demuestra aplicación correcta de mixins.
 
+## Ciclo 2E: instrumentación y prueba integrada manual pendiente
+
+- Se añadió `RadarSpearDiagnostics`, con líneas `[CMI-RadarSpear]` que incluyen launch/effect abreviados, misil, perfil, objetivo y tiempo. `launch_rejected` solo se emite para una solicitud explícitamente gestionada; los lanzamientos nativos no producen estos registros.
+- Los eventos cubren captura y armado, primera activación de guiado, cambios de contacto/primer obstáculo, endpoint de bloque convertido para `findHitEntity`, `onHitBlock` con cancelación Warium, comienzo de cada perfil, confirmación de colisión, consumo de autorización, conteo/aprobación de candidatos y cada cambio efectivo. El primer obstáculo y el contacto de guiado se registran solo al cambiar de estado; no hay logging periódico por tick.
+- `RadarSpearStructural` registra una etapa de rechazo concreta para los bloqueos del recorrido directo y deja en el mismo evento las coordenadas mundial/plot, bloque y cara cuando supera la autorización. `RadarSpearAreaDamage` informa excepciones y rechazos por fase, cantidad de candidatos/aprobados y bloques cambiados. La instrumentación no modifica IFF, perfiles, cálculos, daño ni callbacks.
+- Procedimiento reproducible y condiciones del caso manual: `VALIDATION.md`, sección «Ciclo 2E». Orden: `direct_sable`, `explosive_sable` solo si pasa el directo, rotación estacionaria y un lanzamiento amistoso negativo.
+- `clean build` y las ocho regresiones Java pasan con Java 21. Pasaron asimismo los ocho verificadores de artefacto, targets, bytecode de Warium/AbstractArrow/Sable/guiado, geometría y área. Esto acredita compilación y contratos estáticos, no la ejecución de la secuencia.
+- **No acreditado en juego:** no se inició Minecraft ni el servidor por falta de autorización explícita para arrancarlos. No existe aún evidencia runtime de carga de mixins, callback real, conversión de bloques, ausencia de efectos Warium o respuesta de Sable. El ciclo 2E no está cerrado.
+
 ## Ciclo 2D.1: cardinalidad geométrica de Radar Spear
 
 - Se corrigió en `RadarSpearAreaDamage.impactChecked` el factor Z del AABB candidato. La expresión previa era `(long)(x1-x0+1)*(y1-y0+1)*(z1-y0+1)`: mezclaba `y0` con el eje Z. Para límites X=10..12, Y=60..64 y Z=200..207 contaba 2.220 celdas en lugar de 120; otros desplazamientos podían subestimar el volumen y permitir recorrer más celdas que el límite previsto, o producir un conteo no positivo y rechazar la detonación.

@@ -50,48 +50,90 @@ public final class RadarSpearAreaDamage {
 
     public static boolean impact(ServerLevel level, Entity missile, BlockHitResult hit, Vec3 from, Vec3 to) {
         try { return impactChecked(level,missile,hit,from,to); }
-        catch (RuntimeException unavailable) { return false; }
+        catch (RuntimeException unavailable) {
+            RadarSpearDiagnostics.event(missile, "impact_rejected", "profile=explosive_sable stage=exception type="
+                    + unavailable.getClass().getSimpleName() + " message=" + String.valueOf(unavailable.getMessage()));
+            return false;
+        }
     }
 
     private static boolean impactChecked(ServerLevel level, Entity missile, BlockHitResult hit, Vec3 from, Vec3 to) {
         if (level == null || missile == null || missile.level() != level || hit == null || !missile.isAlive()
-                || !level.getServer().isSameThread() || !RadarSpearMode.managed(missile.getPersistentData())) return false;
+                || !level.getServer().isSameThread() || !RadarSpearMode.managed(missile.getPersistentData())) {
+            RadarSpearDiagnostics.event(missile, "impact_rejected", "profile=explosive_sable stage=preconditions");
+            return false;
+        }
         var data=missile.getPersistentData();
         if (!data.hasUUID("cmiOwner") || !data.hasUUID("cmiTargetId") || !"SABLE".equals(data.getString("cmiTargetKind"))
-                || !data.contains("Time",net.minecraft.nbt.Tag.TAG_DOUBLE) || !Double.isFinite(data.getDouble("Time")) || data.getDouble("Time")<10) return false;
+                || !data.contains("Time",net.minecraft.nbt.Tag.TAG_DOUBLE) || !Double.isFinite(data.getDouble("Time")) || data.getDouble("Time")<10) {
+            RadarSpearDiagnostics.event(missile, "impact_rejected", "profile=explosive_sable stage=managed_identity_or_arming");
+            return false;
+        }
         Actor actor=new Actor(data.getUUID("cmiOwner"),data.getString("cmiIff"),data.hasUUID("cmiPlatform")?data.getUUID("cmiPlatform"):null);
         TargetId target=new TargetId(TargetId.Kind.SABLE,data.getUUID("cmiTargetId"));
         long tick=level.getGameTime();
-        if (!RadarSpearImpact.matchesProfile(data,missile.getUUID(),tick,actor,target,"explosive_sable")) return false;
-        if (!(level.getPlayerByUUID(actor.owner()) instanceof ServerPlayer owner) || !owner.isAlive() || owner.level()!=level) return false;
+        if (!RadarSpearImpact.matchesProfile(data,missile.getUUID(),tick,actor,target,"explosive_sable")) {
+            RadarSpearDiagnostics.event(missile, "impact_rejected", "profile=explosive_sable stage=profile_authorization");
+            return false;
+        }
+        if (!(level.getPlayerByUUID(actor.owner()) instanceof ServerPlayer owner) || !owner.isAlive() || owner.level()!=level) {
+            RadarSpearDiagnostics.event(missile, "impact_rejected", "profile=explosive_sable stage=owner_unavailable");
+            return false;
+        }
         var container=SubLevelContainer.getContainer(level);
         SubLevel ship=container==null?null:container.getSubLevel(target.uuid());
-        if (ship==null || ship.isRemoved() || ship.getLevel()!=level || ship.logicalPose()==null || ship.getPlot()==null) return false;
+        if (ship==null || ship.isRemoved() || ship.getLevel()!=level || ship.logicalPose()==null || ship.getPlot()==null) {
+            RadarSpearDiagnostics.event(missile, "impact_rejected", "profile=explosive_sable stage=designated_sable_unavailable");
+            return false;
+        }
         Pose3d pose=new Pose3d(ship.logicalPose());
         var first=SableFirstHit.evaluate(level,actor,target,from,to,missile);
+        RadarSpearDiagnostics.firstHit(missile, first);
         Vec3 worldCenter=first==null?null:first.worldHit();
         if (!RadarSpearStructural.queryMatches(first,tick,pose,ship.logicalPose())
-                || !RadarSpearStructural.confirmed(first,target,hit,pose.transformPosition(hit.getLocation()))
-                || first.state()==null || !SableFirstHit.corridorClear(level,actor,from,first,missile)
+                || !RadarSpearStructural.confirmed(first,target,hit,pose.transformPosition(hit.getLocation()))) {
+            RadarSpearDiagnostics.event(missile, "impact_rejected", "profile=explosive_sable stage=native_callback_mismatch callbackBlock="
+                    + hit.getBlockPos() + " callbackFace=" + hit.getDirection() + " callbackLocal=" + RadarSpearDiagnostics.vec(hit.getLocation()));
+            return false;
+        }
+        RadarSpearDiagnostics.event(missile, "impact_confirmed", "profile=explosive_sable stage=callback_match ship=" + first.shipId() + " world="
+                + RadarSpearDiagnostics.vec(first.worldHit()) + " plot=" + RadarSpearDiagnostics.vec(first.plotHit())
+                + " block=" + first.plotPos() + " face=" + first.face());
+        if (first.state()==null || !SableFirstHit.corridorClear(level,actor,from,first,missile)
                 || !SableFirstHit.territoryClear(level,actor,worldCenter)
                 || CombatServices.resolve(level,target).filter(c->CombatServices.canEngage(level,actor,c)).isEmpty()
-                || !enemyCrewOnly(level,actor,target.uuid(),worldCenter)) return false;
+                || !enemyCrewOnly(level,actor,target.uuid(),worldCenter)) {
+            RadarSpearDiagnostics.event(missile, "impact_rejected", "profile=explosive_sable stage=corridor_iff_or_protection");
+            return false;
+        }
 
         Vec3 plotCenter=pose.transformPositionInverse(worldCenter);
-        if (!RadarSpearBlastGeometry.finite(plotCenter) || plotCenter.distanceToSqr(first.plotHit())>1.0e-10) return false;
+        if (!RadarSpearBlastGeometry.finite(plotCenter) || plotCenter.distanceToSqr(first.plotHit())>1.0e-10) {
+            RadarSpearDiagnostics.event(missile, "impact_rejected", "profile=explosive_sable stage=world_plot_center_mismatch");
+            return false;
+        }
         var inverse=(java.util.function.UnaryOperator<Vec3>)pose::transformPositionInverse;
         var forward=(java.util.function.UnaryOperator<Vec3>)pose::transformPosition;
         AABB bounds=RadarSpearBlastGeometry.worldSphereBoundsInPlot(worldCenter,STRUCTURAL_ENVELOPE,inverse);
-        if (bounds==null || !bounded(bounds)) return false;
+        if (bounds==null || !bounded(bounds)) {
+            RadarSpearDiagnostics.event(missile, "impact_rejected", "profile=explosive_sable stage=plot_bounds_invalid");
+            return false;
+        }
         int x0=floor(bounds.minX),y0=floor(bounds.minY),z0=floor(bounds.minZ);
         int x1=floor(bounds.maxX),y1=floor(bounds.maxY),z1=floor(bounds.maxZ);
         final long cells;
         try {
             cells=RadarSpearBlastGeometry.inclusiveCellCount(x0,x1,y0,y1,z0,z1);
         } catch (IllegalArgumentException | ArithmeticException invalidBounds) {
+            RadarSpearDiagnostics.event(missile, "impact_rejected", "profile=explosive_sable stage=candidate_count_invalid type="
+                    + invalidBounds.getClass().getSimpleName());
             return false;
         }
-        if (cells>MAX_CANDIDATE_CELLS) return false;
+        if (cells>MAX_CANDIDATE_CELLS) {
+            RadarSpearDiagnostics.event(missile, "impact_rejected", "profile=explosive_sable stage=candidate_cap cells=" + cells
+                    + " cap=" + MAX_CANDIDATE_CELLS);
+            return false;
+        }
 
         LevelPlot plot=ship.getPlot();
         PlotView view=new PlotView(level,plot);
@@ -100,10 +142,16 @@ public final class RadarSpearAreaDamage {
         for (int x=x0;x<=x1;x++) for (int y=y0;y<=y1;y++) for (int z=z0;z<=z1;z++) {
             BlockPos pos=new BlockPos(x,y,z);
             BlockState state=view.state(pos);
-            if (state==null) return false;
+            if (state==null) {
+                RadarSpearDiagnostics.event(missile, "impact_rejected", "profile=explosive_sable stage=plot_chunk_unavailable block=" + pos);
+                return false;
+            }
             Change change=changeFor(pos,state);
             if (change==null || state.hasBlockEntity() || view.blockEntity(pos)!=null) continue;
-            if (view.unknown || !view.neighborhoodKnown(pos)) return false;
+            if (view.unknown || !view.neighborhoodKnown(pos)) {
+                RadarSpearDiagnostics.event(missile, "impact_rejected", "profile=explosive_sable stage=block_neighborhood_unknown block=" + pos);
+                return false;
+            }
             VoxelShape shape=state.getCollisionShape(view.plotLevel,pos);
             boolean inEnvelope=false,visible=false;
             for (AABB localBox:shape.toAabbs()) {
@@ -114,32 +162,66 @@ public final class RadarSpearAreaDamage {
                     if (pos.equals(first.plotPos()) || exposed(view,plotCenter,point,first.plotPos(),pos,checks)) { visible=true;break; }
                 }
             }
-            if (checks[0]>MAX_GEOMETRY_CHECKS || view.unknown) return false;
+            if (checks[0]>MAX_GEOMETRY_CHECKS || view.unknown) {
+                RadarSpearDiagnostics.event(missile, "impact_rejected", "profile=explosive_sable stage=geometry_budget_or_unknown checks=" + checks[0]);
+                return false;
+            }
             if (!inEnvelope || !visible) continue;
             Vec3 blockWorld=forward.apply(Vec3.atCenterOf(pos));
             if (!safeTerritory(level,actor,forward,pos) || CombatServices.isProtected(level,actor,blockWorld)) continue;
             changes.add(change);
         }
-        if (view.unknown || changes.size()<MIN_BLOCKS_PER_EFFECT || changes.size()>MAX_CANDIDATE_CELLS) return false;
+        RadarSpearDiagnostics.event(missile, "area_candidates", "cells=" + cells + " eligible=" + changes.size()
+                + " bounds=" + x0 + ".." + x1 + "," + y0 + ".." + y1 + "," + z0 + ".." + z1);
+        if (view.unknown || changes.size()<MIN_BLOCKS_PER_EFFECT || changes.size()>MAX_CANDIDATE_CELLS) {
+            RadarSpearDiagnostics.event(missile, "impact_rejected", "profile=explosive_sable stage=area_candidates unknown="
+                    + view.unknown + " eligible=" + changes.size());
+            return false;
+        }
 
         // Consume before external block listeners; re-entrant or repeated callbacks cannot apply the area twice.
-        if (!RadarSpearImpact.consume(data,missile.getUUID(),level.getGameTime())) return false;
+        if (!RadarSpearImpact.consume(data,missile.getUUID(),level.getGameTime())) {
+            RadarSpearDiagnostics.event(missile, "impact_rejected", "profile=explosive_sable stage=consume_failed");
+            return false;
+        }
+        RadarSpearDiagnostics.event(missile, "impact_consumed", "profile=explosive_sable candidates=" + changes.size());
         var frozen=data.copy();
         List<Change> approved=new ArrayList<>();
         for (Change change:changes) {
-            if (!stillAuthorized(level,missile,owner,actor,target,container,ship,pose,tick,frozen,view,change,worldCenter,plotCenter,first.plotPos(),inverse,forward,checks)) return false;
+            if (!stillAuthorized(level,missile,owner,actor,target,container,ship,pose,tick,frozen,view,change,worldCenter,plotCenter,first.plotPos(),inverse,forward,checks)) {
+                RadarSpearDiagnostics.event(missile, "impact_rejected", "profile=explosive_sable stage=per_block_prelistener_revalidation block=" + change.pos());
+                return false;
+            }
             if (CommonHooks.fireBlockBreak(level,owner.gameMode.getGameModeForPlayer(),owner,change.pos(),change.before()).isCanceled()) continue;
-            if (!stillAuthorized(level,missile,owner,actor,target,container,ship,pose,tick,frozen,view,change,worldCenter,plotCenter,first.plotPos(),inverse,forward,checks)) return false;
+            if (!stillAuthorized(level,missile,owner,actor,target,container,ship,pose,tick,frozen,view,change,worldCenter,plotCenter,first.plotPos(),inverse,forward,checks)) {
+                RadarSpearDiagnostics.event(missile, "impact_rejected", "profile=explosive_sable stage=per_block_postlistener_revalidation block=" + change.pos());
+                return false;
+            }
             approved.add(change);
         }
-        if (approved.size()<MIN_BLOCKS_PER_EFFECT
-                || !impactStillConfirmed(level,actor,target,missile,from,to,hit,first,ship,pose,tick)) return false;
+        RadarSpearDiagnostics.event(missile, "area_approved", "eligible=" + changes.size() + " approved=" + approved.size());
+        if (approved.size()<MIN_BLOCKS_PER_EFFECT) {
+            RadarSpearDiagnostics.event(missile, "impact_rejected", "profile=explosive_sable stage=approved_block_count count=" + approved.size());
+            return false;
+        }
+        if (!impactStillConfirmed(level,actor,target,missile,from,to,hit,first,ship,pose,tick)) {
+            RadarSpearDiagnostics.event(missile, "impact_rejected", "profile=explosive_sable stage=impact_revalidation");
+            return false;
+        }
         int applied=0;
         for (Change change:approved) {
-            if (!stillAuthorized(level,missile,owner,actor,target,container,ship,pose,tick,frozen,view,change,worldCenter,plotCenter,first.plotPos(),inverse,forward,checks)) break;
+            if (!stillAuthorized(level,missile,owner,actor,target,container,ship,pose,tick,frozen,view,change,worldCenter,plotCenter,first.plotPos(),inverse,forward,checks)) {
+                RadarSpearDiagnostics.event(missile, "impact_rejected", "profile=explosive_sable stage=per_block_apply_revalidation block=" + change.pos() + " alreadyApplied=" + applied);
+                break;
+            }
             boolean changed=change.destroy()?level.destroyBlock(change.pos(),false):level.setBlock(change.pos(),change.after(),3);
-            if (changed) applied++;
+            if (changed) {
+                applied++;
+                RadarSpearDiagnostics.event(missile, "block_changed", "profile=explosive_sable block=" + change.pos()
+                        + " before=" + change.before() + " after=" + change.after() + " index=" + applied);
+            }
         }
+        RadarSpearDiagnostics.event(missile, "explosive_sable_complete", "applied=" + applied + " approved=" + approved.size());
         return applied>0;
     }
 
