@@ -11,6 +11,7 @@
     "weapons.LauncherMaterialAccess",
     "weapons.StandardLauncherTickMixin",
     "weapons.CannonProbeNeoMixin",
+    "missiles.GuidanceTurningSpeedInvoker",
     "missiles.InfraredGuidanceMixin",
     "missiles.IRSeekerTargetLossMixin",
     "missiles.RadarSpearLaunchMixin",

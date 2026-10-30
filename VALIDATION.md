@@ -1,20 +1,25 @@
 # Validación realizada
 
-## Ciclo 2E — escenario reproducible para ejecución manual
+## Ciclo 2E — escenario y primera ejecución runtime
 
 ### Estado
 
-- HEAD inicial: `61398fd480169495cdd353b2968feae6d7159a6b` (`main`). El escenario usa el modpack actual fijado por el proyecto; no se modificaron perfiles, servidor, mundos ni JAR de terceros.
+- HEAD inicial: `9536b794028204c4d9ea569d3efc1c0743e9fcc4` (`main`). Se usó solo el entorno aislado `CMI-Cycle-2E-Test`; no se modificaron carpetas de producción ni JAR de terceros.
 - Se añadieron logs de servidor de baja frecuencia en `RadarSpearDiagnostics`. Sus prefijos `[CMI-RadarSpear]` aparecen solo en la ruta CMI gestionada; los lanzamientos nativos no se instrumentan. Los estados de contacto/primer obstáculo se registran cuando cambian, no cada tick.
-- El escenario y la lista de observaciones están preparados, pero requieren que el usuario inicie manualmente un mundo de prueba. **No se inició Minecraft, servidor ni GameTest. Ningún punto de la cadena está acreditado en juego.**
-- El artefacto que se debe instalar manualmente en el perfil de prueba, después de decidir iniciar ese mundo, es `build/libs/create-military-integration-0.1.0-dev.jar`.
+- El servidor local inició y llegó a `Done (14.993s)`; el cliente entró al mundo. CMI figura en el listado de mods y no aparece un error fatal de carga/mixin de CMI en el log de este arranque. No hay una línea de log que demuestre individualmente que cada mixin haya sido aplicado.
+- La nave de prueba (`/fill 32 140 8 36 142 12 minecraft:stone`, cofre en `34 142 10`, `/sable assemble area 32 140 8 36 142 12`) se ensambló correctamente con 75 bloques.
+- La Fase A no empezó: `/cmi claim 34 142 10`, después del ensamblado, respondió `No block entity at position`. El comando CMI busca el block entity con `ServerLevel.getBlockEntity(pos)` y esa posición de plot no se resuelve desde el mundo principal. Solo había un jugador conectado; `/cmi hostile <player> true` requiere un segundo jugador online. No se disparó ningún misil y no se observó ninguna línea `[CMI-RadarSpear]`.
+- En el primer intento de entrar, Distant Horizons generó `IllegalStateException: Chunky is not loaded` durante el procesamiento de paquetes de chunks. Se deshabilitó `Chunky-NeoForge-1.4.23.jar` solo en `disabled-client-mods` de la copia cliente aislada; el ingreso siguiente funcionó. El servidor de prueba conserva Chunky. Esta modificación de diagnóstico no afecta el perfil normal.
+- Se ejecutó `/save-all flush` y el log confirmó `Saved the game` y que todos los chunks se guardaron. El servidor de prueba sigue ejecutándose: la consola de su proceso no está accesible desde esta sesión y el comando de consola `stop` no está expuesto al cliente; no se forzó la terminación del proceso.
+- Por lo tanto, no hay todavía evidencia runtime de captura, guiado, `sable_first_hit`, callback, daño, explosión duplicada, rotación ni rechazo IFF. El Ciclo 2E permanece abierto.
+- El artefacto verificado se construyó en `build/libs/create-military-integration-0.1.0-dev.jar`; SHA-256: `5FB3397CAB1760F5367A5F0F8701949D9BCD4F31B3617060FE2E2F0FEE431333`.
 
 ### Preparación manual
 
-Usar un mundo de prueba dedicado con el perfil que ya tiene NeoForge 21.1.265, Create 6.0.10, Warium CE 1.0.4, Sable 2.0.6, FTB Teams/Chunks y las dependencias fijadas; instalar el JAR CMI que se compile en este ciclo en el perfil de prueba. Mantener al tirador y al blanco cerca para cargar chunks, fuera de claims FTB y colonias MineColonies. No subir pasajeros ni tripulación a la nave blanco.
+Usar el mundo dedicado `CMI-Cycle-2E-Test` con NeoForge 21.1.265, Create 6.0.10, Warium CE 1.0.4, Sable 2.0.6, FTB Teams/Chunks y las dependencias fijadas. Mantener al tirador y al blanco cerca para cargar chunks, fuera de claims FTB y colonias MineColonies. No subir pasajeros ni tripulación a la nave blanco. **Antes de repetir:** resolver cómo asignar una identidad de propietario al Sable sin depender de `/cmi claim` sobre un block entity ya dentro del plot y disponer de una segunda identidad/jugador para marcar hostilidad mediante el comando actual.
 
-1. Crear una aeronave Sable pequeña, estacionaria y sin tripulantes. En la cara que recibirá el impacto, poner un único bloque `minecraft:stone` expuesto como superficie de colisión. Añadir un bloque con entidad (por ejemplo, un cofre) en la nave para poder asignar su dueño con `/cmi claim`.
-2. El dueño de la nave blanco ejecuta `/cmi claim <x> <y> <z>` apuntando al cofre de esa Sable. El tirador y el dueño blanco no deben ser aliados para el caso positivo; el tirador ejecuta `/cmi hostile <jugador_blanco> true`.
+1. Crear una aeronave Sable pequeña, estacionaria y sin tripulantes. En la cara que recibirá el impacto, poner un único bloque `minecraft:stone` expuesto como superficie de colisión. Añadir un bloque entidad para identificar al propietario.
+2. Asignar/confirmar la propiedad mientras el bloque entidad todavía sea resoluble desde el nivel principal; después comprobar que Sable y CMI la conservan en el UUID del subnivel. La vía posterior al ensamblado no está disponible con el comando actual: `/cmi claim` llama a `ServerLevel.getBlockEntity`, y el intento en `34 142 10` devolvió `No block entity at position`. No declarar enemigo un Sable cuya propiedad no se haya confirmado. Para el caso positivo se necesitan tirador y dueño blanco distintos; `/cmi hostile` solo acepta un jugador online. El tirador ejecuta `/cmi hostile <jugador_blanco> true` después de validar que no sean aliados FTB.
 3. Colocar/cargar un Radar Spear Missile Hardpoint y un Ordinance Controller de Warium. Configurar el controlador para designar un punto dentro de la caja de la aeronave blanco. `HardpointTriggerTickProcedure` copia `TargetX/Y/Z` del controlador seleccionado al hardpoint; confirmar que la designación permanece válida y que la nave está cargada.
 4. El propietario del lanzador ejecuta `/cmi radarspearprofile <x> <y> <z> direct_sable` sobre el hardpoint. Cargar el misil según el montaje normal de Warium y disparar con el pulso que requiera ese hardpoint.
 5. Seguir `logs/latest.log` con `Select-String -Path logs/latest.log -Pattern '\[CMI-RadarSpear\]'`. Conservar el extracto y apuntar el bloque inicial/final; detener la prueba en el primer evento de rechazo o ausencia de evento esperado.
@@ -40,13 +45,13 @@ Exigir `impact_confirmed` con el Sable correcto, `area_candidates` con más de u
 
 - Los eventos incluyen `launch_rejected`, `launch_captured`, `impact_armed`, `guidance_active`, cambios de contacto/primer obstáculo, `arrow_collision_world_endpoint`, `on_hit_block`, comienzos `direct_sable`/`explosive_sable`, `impact_confirmed`, `area_candidates`, `area_approved`, `impact_consumed`, `block_changed`, rechazos por fase y `missile_discarded`.
 - La línea `native_warium_cancelled=true` acredita que CMI interceptó la entrada al callback; la ausencia de explosión/fragments debe observarse durante la ejecución y no se infiere solo del log.
-- Compilar y verificar estáticamente no demuestra que mixins hayan tejido ni que la nave reciba daño. La validación integrada queda **PENDIENTE DE AUTORIZACIÓN Y EJECUCIÓN MANUAL**.
+- La ejecución actual confirmó solo arranque, entrada del cliente y ensamblado Sable; no se alcanzó la prueba de lanzamiento. El daño y las demás fases quedan **PENDIENTES DE VALIDACIÓN EN JUEGO**.
 
 ### Validación estática de Ciclo 2E
 
 - `clean build` con Java 21 y dependencias fijadas terminó en `BUILD SUCCESSFUL`; las ocho regresiones Java pasaron. Se actualizó la comprobación fuente de `radarSpearModeRegression` para admitir el rechazo gestionado con diagnóstico.
-- Pasaron los ocho verificadores: `Verify-Artifact.ps1` (63 clases Java 21, 22 mixins), `Verify-MixinTargets.ps1` (26 clases objetivo), `Verify-RadarSpearBytecode.ps1`, `Verify-RadarSpearArrowCollision.ps1`, `Verify-SableBytecode.ps1`, `Verify-Geometry.ps1`, `Verify-GuidanceBytecode.ps1` y `Verify-RadarSpearArea.ps1`.
-- Los verificadores comprueban estructura, referencias y bytecode fijado. No se aplicaron mixins en juego ni se evaluaron los resultados observables de las fases A-C.
+- Pasaron los ocho verificadores: `Verify-Artifact.ps1` (64 clases Java 21, 23 mixins), `Verify-MixinTargets.ps1` (27 clases objetivo), `Verify-RadarSpearBytecode.ps1`, `Verify-RadarSpearArrowCollision.ps1`, `Verify-SableBytecode.ps1`, `Verify-Geometry.ps1`, `Verify-GuidanceBytecode.ps1` y `Verify-RadarSpearArea.ps1`.
+- Los verificadores comprueban estructura, referencias y bytecode fijado. La sesión real no produjo un error fatal CMI, pero no confirmó la aplicación de cada mixin ni los resultados observables de las fases A-C.
 
 ## Ciclo 2D.1 — cardinalidad X/Y/Z y límites del área
 

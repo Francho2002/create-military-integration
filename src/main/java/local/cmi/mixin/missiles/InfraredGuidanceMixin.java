@@ -36,7 +36,6 @@ public abstract class InfraredGuidanceMixin {
     @Shadow private boolean isLockedOn;
     @Shadow private int trackedEntityId;
     @Shadow private BlockPos currentPos;
-    @Shadow protected abstract double calculateTurningSpeed(double size, double speed, BlockState state);
     private static final String ID = "cmiTargetId";
     private static final String KIND = "cmiTargetKind";
 
@@ -162,7 +161,7 @@ public abstract class InfraredGuidanceMixin {
         if (direction.dot(offset.normalize()) < Math.cos(Math.toRadians(seeker.trackFov() / 2))) { cmi$abortFlight(server, missile); return; }
         double lead = offset.length() / speed;
         Vec3 aim = offset.add(target.velocity().scale(lead)).normalize();
-        double turn = Math.max(0, Math.min(1, calculateTurningSpeed(missile.getContraption().getBlocks().size(), speed, state)));
+        double turn = Math.max(0, Math.min(1, ((GuidanceTurningSpeedInvoker) (Object) this).cmi$calculateTurningSpeed(missile.getContraption().getBlocks().size(), speed, state)));
         Vec3 steered = direction.lerp(aim, turn);
         if (steered.lengthSqr() > 1.0e-12) {
             Vec3 next = steered.normalize().scale(speed);

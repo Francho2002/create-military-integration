@@ -2,14 +2,16 @@
 
 Esta tabla describe el código, no una prueba dentro de Minecraft. Compilación no demuestra aplicación correcta de mixins.
 
-## Ciclo 2E: instrumentación y prueba integrada manual pendiente
+## Ciclo 2E: primera ejecución integrada (abierta)
 
 - Se añadió `RadarSpearDiagnostics`, con líneas `[CMI-RadarSpear]` que incluyen launch/effect abreviados, misil, perfil, objetivo y tiempo. `launch_rejected` solo se emite para una solicitud explícitamente gestionada; los lanzamientos nativos no producen estos registros.
 - Los eventos cubren captura y armado, primera activación de guiado, cambios de contacto/primer obstáculo, endpoint de bloque convertido para `findHitEntity`, `onHitBlock` con cancelación Warium, comienzo de cada perfil, confirmación de colisión, consumo de autorización, conteo/aprobación de candidatos y cada cambio efectivo. El primer obstáculo y el contacto de guiado se registran solo al cambiar de estado; no hay logging periódico por tick.
 - `RadarSpearStructural` registra una etapa de rechazo concreta para los bloqueos del recorrido directo y deja en el mismo evento las coordenadas mundial/plot, bloque y cara cuando supera la autorización. `RadarSpearAreaDamage` informa excepciones y rechazos por fase, cantidad de candidatos/aprobados y bloques cambiados. La instrumentación no modifica IFF, perfiles, cálculos, daño ni callbacks.
-- Procedimiento reproducible y condiciones del caso manual: `VALIDATION.md`, sección «Ciclo 2E». Orden: `direct_sable`, `explosive_sable` solo si pasa el directo, rotación estacionaria y un lanzamiento amistoso negativo.
-- `clean build` y las ocho regresiones Java pasan con Java 21. Pasaron asimismo los ocho verificadores de artefacto, targets, bytecode de Warium/AbstractArrow/Sable/guiado, geometría y área. Esto acredita compilación y contratos estáticos, no la ejecución de la secuencia.
-- **No acreditado en juego:** no se inició Minecraft ni el servidor por falta de autorización explícita para arrancarlos. No existe aún evidencia runtime de carga de mixins, callback real, conversión de bloques, ausencia de efectos Warium o respuesta de Sable. El ciclo 2E no está cerrado.
+- Procedimiento y primer intento documentados en `VALIDATION.md`. Se usó el servidor/clientes aislados `CMI-Cycle-2E-Test`; producción no se abrió ni modificó.
+- En runtime, NeoForge llegó a `Done`, el cliente autenticó y entró, CMI apareció en el listado de mods y la nave Sable de 75 bloques se ensambló. No hubo un error fatal de carga de CMI en este arranque. El log no confirma por sí solo que cada mixin se haya aplicado.
+- El primer bloqueo de la Fase A fue preparar propiedad/hostilidad: `/cmi claim 34 142 10`, ejecutado después de ensamblar el cofre dentro del plot, respondió `No block entity at position`. El comando consulta `ServerLevel.getBlockEntity` y no resuelve directamente un block entity del subnivel. Solo había un jugador conectado y `/cmi hostile` requiere otro jugador online. No se lanzó ningún misil ni se ejecutó A, B, C1 o C2.
+- Durante el primer ingreso, Distant Horizons falló al procesar un chunk porque el cliente de prueba no tenía Chunky cargado. Se retiró Chunky únicamente de la copia cliente aislada; el siguiente ingreso funcionó. No se tocó el cliente habitual ni el servidor real.
+- `clean build`, las ocho regresiones Java y los ocho verificadores estáticos pasaron para el artefacto actual. **Pendiente en juego:** aplicación efectiva de los mixins, captura/guiado/colisión Radar Spear, callback, cambio de bloque, ausencia de efectos Warium, rotación e IFF. El Ciclo 2E sigue abierto.
 
 ## Ciclo 2D.1: cardinalidad geométrica de Radar Spear
 

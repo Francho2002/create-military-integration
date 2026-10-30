@@ -19,6 +19,11 @@ public final class GuidanceModeRegression {
             check(GuidanceMode.managed(latch, false, false) == (flags != 0), "mode after target loss: " + flags);
         }
         String ir = java.nio.file.Files.readString(java.nio.file.Path.of("src/main/java/local/cmi/mixin/missiles/InfraredGuidanceMixin.java"));
+        String speedInvoker = java.nio.file.Files.readString(java.nio.file.Path.of("src/main/java/local/cmi/mixin/missiles/GuidanceTurningSpeedInvoker.java"));
+        check(!ir.contains("@Shadow protected abstract double calculateTurningSpeed"), "inherited method is not shadowed on the child target");
+        check(ir.contains("((GuidanceTurningSpeedInvoker) (Object) this).cmi$calculateTurningSpeed("), "turn model uses the parent-target invoker");
+        check(speedInvoker.contains("@Mixin(targets = \"riftyboi.cbcmodernwarfare.munitions.munitions_contraption_launcher.guidance.GuidanceBlockEntity\"")
+                && speedInvoker.contains("@Invoker(value = \"calculateTurningSpeed\", remap = false)"), "turn model invoker targets the declaring parent class");
         int acquire = ir.indexOf("private void cmi$acquire(");
         int guide = ir.indexOf("private void cmi$guide(");
         check(acquire >= 0 && guide > acquire, "both Neo Warfare hooks exist");
