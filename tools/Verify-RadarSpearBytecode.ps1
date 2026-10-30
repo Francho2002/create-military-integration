@@ -38,3 +38,17 @@ foreach ($method in @('tick','onHitEntity','onHitBlock')) {
     if ($src -notmatch ('@Inject\(method\s*=\s*"' + $method + '"\s*,\s*at\s*=\s*@At\("HEAD"\)\s*,\s*cancellable\s*=\s*true')) { throw "Injection point changed: $method" }
 }
 'OK: Radar Spear target/handler descriptors, HEAD/cancellable hooks and native tick/impact call order. Does not apply mixins.'
+$fire = Listing $Warium 'com.wariumce.procedures.MissileHardpointFireProcedure' '-c'
+$spawn = [regex]::Matches($fire, 'invokestatic\s+#[0-9]+\s+// Method com/wariumce/util/BlockWeaponRecoil\.spawn:')
+if ($spawn.Count -ne 4) { throw "Expected four spawn calls, got $($spawn.Count)" }
+$radar = $fire.Substring($fire.IndexOf('Field com/wariumce/init/CrustyChunksModBlocks.RADAR_SPEAR_MISSILE_HARDPOINT'))
+if ($radar -notmatch '(?s)MissileHardpointFireProcedure\$15.*BlockWeaponRecoil\.spawn:.*saveWithFullMetadata.*setBlock:.*loadWithComponents:') { throw 'Radar spawn or replacement order changed' }
+$factory = Listing $Warium 'com.wariumce.procedures.MissileHardpointFireProcedure$15' '-c'
+if ($factory -notmatch 'new\s+#[0-9]+\s+// class com/wariumce/entity/RadarSpearMissileProjectileEntity') { throw 'Radar factory type changed' }
+$recoil = Listing $Warium 'com.wariumce.util.BlockWeaponRecoil' '-c'
+if ($recoil -notmatch '(?s)boolean spawn\(.*?Level.addFreshEntity:') { throw 'Spawn insertion changed' }
+$launch = Listing $Artifact 'local.cmi.mixin.missiles.RadarSpearLaunchMixin' '-s'
+RequireDescriptor $launch 'cmi$captureLaunch' '(Lnet/minecraft/world/level/Level;Lnet/minecraft/world/entity/projectile/Projectile;Lnet/minecraft/core/BlockPos;Lcom/wariumce/util/BlockWeaponRecoil$Weapon;)Z'
+$launchSource = Get-Content -Raw -LiteralPath "$PSScriptRoot/../src/main/java/local/cmi/mixin/missiles/RadarSpearLaunchMixin.java"
+if ($launchSource -notmatch 'ordinal\s*=\s*3') { throw 'Radar spawn redirect ordinal changed' }
+'OK: Radar launch factory, fourth spawn, insertion and block replacement order; mixins not applied.'

@@ -1,5 +1,12 @@
 # Validación realizada
 
+## Ciclo 2B
+
+- `clean build` offline, Java 21 y JAR fijados: correcto. Se ejecutaron las seis regresiones JavaExec, incluidas pruebas NBT del perfil, identidad, expiración, cancelación, consumo único, interceptor, marcador malformado y designación incompleta.
+- `Verify-RadarSpearBytecode.ps1` contrasta el descriptor del redirect, las cuatro llamadas a `BlockWeaponRecoil.spawn`, la fábrica Radar de la cuarta rama y el orden de inserción y reemplazo del hardpoint, además de los hooks de vuelo e impacto. Comprobó firmas y bytecode, sin aplicar mixins.
+- `Verify-Artifact.ps1`, `Verify-MixinTargets.ps1`, `Verify-GuidanceBytecode.ps1`, `Verify-SableBytecode.ps1` y `Verify-Geometry.ps1` se ejecutan para las regresiones anteriores. La copia del contexto de las pruebas es en memoria; no se han programado ni probado tareas o fragmentos diferidos autorizados.
+- No se ejecutó Minecraft, el servidor ni GameTest. No se ha acreditado el daño estructural Sable ni la seguridad integral del comportamiento de bloques, físicas, efectos retardados y otros mods al ejecutar una partida.
+
 ## Ciclo 2
 
 - `clean build` offline con las dependencias fijadas y Java 21: correcto. `check` ejecutó las tres regresiones del ciclo anterior y las nuevas `radarSpearModeRegression` y `shotContextRegression`, sin iniciar Minecraft.

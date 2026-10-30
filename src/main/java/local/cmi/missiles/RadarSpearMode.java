@@ -3,19 +3,22 @@ package local.cmi.missiles;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
 
-/** Persistent one-time decision, made before the native arrow can collide. */
+/** Only an explicit marker selects managed behavior; malformed markers fail closed. */
 public final class RadarSpearMode {
-    private static final String DECIDED = "cmiRadarModeDecided";
+    public enum LaunchMode { NATIVE, REQUESTED, INVALID }
     private RadarSpearMode() {}
-
     public static boolean managed(CompoundTag data) {
-        // An invalid explicit marker must not reactivate native damage.
-        return data.contains("cmiManaged") && (!data.contains("cmiManaged", Tag.TAG_BYTE) || data.getBoolean("cmiManaged"));
+        return data.contains("cmiRadarImpact") || (data.contains("cmiManaged") && (!data.contains("cmiManaged", Tag.TAG_BYTE) || data.getBoolean("cmiManaged")));
     }
-
-    public static boolean beginDecision(CompoundTag data) {
-        if (managed(data) || data.contains(DECIDED)) return false;
-        data.putBoolean(DECIDED, true);
+    public static LaunchMode launchMode(CompoundTag source) {
+        if (!source.contains("cmiManaged")) return LaunchMode.NATIVE;
+        if (!source.contains("cmiManaged", Tag.TAG_BYTE)) return LaunchMode.INVALID;
+        return source.getBoolean("cmiManaged") ? LaunchMode.REQUESTED : LaunchMode.NATIVE;
+    }
+    public static boolean hasDesignation(CompoundTag source) {
+        for (String key : new String[]{"TargetX", "TargetY", "TargetZ"}) {
+            if (!source.contains(key, 99) || !Double.isFinite(source.getDouble(key))) return false;
+        }
         return true;
     }
 }

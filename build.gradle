@@ -82,6 +82,11 @@ tasks.register('radarSpearModeRegression', JavaExec) {
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'local.cmi.missiles.RadarSpearModeRegression'
 }
+tasks.register('radarSpearImpactRegression', JavaExec) {
+    dependsOn 'testClasses'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'local.cmi.missiles.RadarSpearImpactRegression'
+}
 tasks.register('shotContextRegression', JavaExec) {
     dependsOn 'testClasses'
     classpath = sourceSets.test.runtimeClasspath
@@ -89,6 +94,6 @@ tasks.register('shotContextRegression', JavaExec) {
 }
 // Regression entry points run as JavaExec above; this project has no JUnit engine.
 tasks.named('test', Test) { failOnNoDiscoveredTests = false }
-tasks.named('check') { dependsOn 'guidanceModeRegression', 'managedGuidanceNbtRegression', 'geometryIntersectionRegression', 'radarSpearModeRegression', 'shotContextRegression' }
+tasks.named('check') { dependsOn 'guidanceModeRegression', 'managedGuidanceNbtRegression', 'geometryIntersectionRegression', 'radarSpearModeRegression', 'radarSpearImpactRegression', 'shotContextRegression' }
 tasks.register('forbidGameExecution') { doLast { throw new GradleException('Game execution disabled in this development project.') } }
 tasks.matching { it.name.startsWith('run') }.configureEach { dependsOn 'forbidGameExecution' }
