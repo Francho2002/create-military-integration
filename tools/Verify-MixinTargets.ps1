@@ -1,7 +1,14 @@
-param([Parameter(Mandatory)][string]$Mods, [Parameter(Mandatory)][string]$Candidates)
+param([Parameter(Mandatory)][string]$Mods, [Parameter(Mandatory)][string]$Candidates, [string]$Minecraft)
 $ErrorActionPreference = 'Stop'
 $project = Split-Path $PSScriptRoot -Parent
+if (!$Minecraft) {
+    $cache = Join-Path $project '.gradle-home/caches/neoformruntime/intermediate_results'
+    $minecraftArtifacts = @(Get-ChildItem -LiteralPath $cache -File -Filter 'sourcesAndCompiledWithNeoForge*output.jar')
+    if ($minecraftArtifacts.Count -ne 1) { throw 'Pass -Minecraft with the exact generated NeoForge Minecraft artifact' }
+    $Minecraft = $minecraftArtifacts[0].FullName
+}
 $files = @((Get-ChildItem -LiteralPath $Mods -File -Filter '*.jar').FullName) + @((Get-ChildItem -LiteralPath $Candidates -File -Filter '*.jar').FullName) + @((Get-ChildItem -LiteralPath "$project/build/compile-nested" -File -Filter '*.jar').FullName)
+$files += $Minecraft
 $classpath = $files -join [IO.Path]::PathSeparator
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $classIndex = @{}

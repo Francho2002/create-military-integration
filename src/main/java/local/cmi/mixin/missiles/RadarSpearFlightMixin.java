@@ -16,7 +16,7 @@ public abstract class RadarSpearFlightMixin {
     private static void cmi$managedFlight(LevelAccessor level, double x, double y, double z, Entity missile, CallbackInfo ci) {
         if (missile != null && RadarSpearMode.managed(missile.getPersistentData())) {
             ci.cancel();
-            if (level instanceof ServerLevel server) RadarSpearBridge.tick(server, missile);
+            if (!missile.isRemoved() && level instanceof ServerLevel server) RadarSpearBridge.tick(server, missile);
         }
     }
 }

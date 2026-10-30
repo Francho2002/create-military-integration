@@ -17,13 +17,19 @@ import net.minecraft.world.phys.shapes.CollisionContext;
 /** A fresh, bounded, conservative first-solid query. A result never authorizes damage. */
 public final class SableFirstHit {
     public enum Kind { CLEAR, TARGET, OWN, FRIEND, OTHER_ENEMY, NEUTRAL, WORLD, UNKNOWN }
-    public record Result(Kind kind, UUID shipId, Vec3 worldHit, BlockPos plotPos, Direction face, BlockState state) {}
-    private static Result simple(Kind kind) { return new Result(kind, null, null, null, null, null); }
+    /** worldHit is world-space; plotHit, plotPos and face are ship-plot-space. */
+    public record Result(Kind kind, UUID shipId, Vec3 worldHit, Vec3 plotHit, BlockPos plotPos, Direction face, BlockState state, long queryTick, dev.ryanhcode.sable.companion.math.Pose3d pose) {
+        public Result(Kind kind, UUID shipId, Vec3 worldHit, BlockPos plotPos, Direction face, BlockState state) {
+            this(kind, shipId, worldHit, null, plotPos, face, state, -1, null);
+        }
+    }
+    private static Result simple(Kind kind) { return new Result(kind, null, null, null, null, null, null, -1, null); }
     private SableFirstHit() {}
 
     public static Result evaluate(ServerLevel level, Actor actor, TargetId target, Vec3 from, Vec3 to, Entity ignored) {
         if (level == null || actor == null || actor.owner() == null || target == null || target.kind() != TargetId.Kind.SABLE || target.uuid() == null || !worldFinite(from) || !worldFinite(to) || from.distanceToSqr(to) < 1e-12 || from.distanceToSqr(to) > 4096) return simple(Kind.UNKNOWN);
         try {
+            long queryTick = level.getGameTime();
             var container = SubLevelContainer.getContainer(level);
             if (container == null) return simple(Kind.UNKNOWN);
             AABB region = new AABB(from, to).inflate(1e-6);
@@ -43,7 +49,7 @@ public final class SableFirstHit {
                 if (box.contains(from)) distance = 0;
                 else { var hit = box.clip(from, to); if (hit.isPresent()) distance = from.distanceToSqr(hit.get()); }
                 if (!Double.isFinite(distance)) continue;
-                if (Math.abs(distance - entityDistance) < 1e-8) { entityKind = Kind.UNKNOWN; continue; }
+                if (sameDistance(distance, entityDistance)) { entityKind = Kind.UNKNOWN; continue; }
                 if (distance < entityDistance) {
                     entityDistance = distance;
                     var contact = CombatServices.resolve(level, new TargetId(TargetId.Kind.ENTITY, entity.getUUID()));
@@ -65,14 +71,15 @@ public final class SableFirstHit {
             Result result = simple(Kind.CLEAR);
             if (world.getType() != HitResult.Type.MISS) {
                 best = from.distanceToSqr(world.getLocation());
-                result = new Result(Kind.WORLD, null, world.getLocation(), null, world.getDirection(), null);
+                result = new Result(Kind.WORLD, null, world.getLocation(), null, null, world.getDirection(), null, -1, null);
             }
             var query = new BoundingBox3d(region.minX, region.minY, region.minZ, region.maxX, region.maxY, region.maxZ);
             int budget = 12000;
             for (var ship : container.queryIntersecting(query)) {
                 if (ship.isRemoved()) continue;
                 if (ship.getLevel() != level || ship.getPlot() == null || ship.logicalPose() == null) return simple(Kind.UNKNOWN);
-                Vec3 a = ship.logicalPose().transformPositionInverse(from), b = ship.logicalPose().transformPositionInverse(to);
+                var pose = new dev.ryanhcode.sable.companion.math.Pose3d(ship.logicalPose());
+                Vec3 a = pose.transformPositionInverse(from), b = pose.transformPositionInverse(to);
                 if (!finite(a) || !finite(b)) return simple(Kind.UNKNOWN);
                 int divisions = PlotGeometryBounds.subdivisions(a.x,a.y,a.z,b.x,b.y,b.z);
                 for (int i=0; i<divisions; i++) {
@@ -89,10 +96,10 @@ public final class SableFirstHit {
                         for (var box : shape.toAabbs()) if (box.move(pos).contains(a)) return simple(Kind.UNKNOWN);
                         var hit=shape.clip(a,b,pos);
                         if (hit==null) continue;
-                        Vec3 point=ship.logicalPose().transformPosition(hit.getLocation());
+                        Vec3 point=pose.transformPosition(hit.getLocation());
                         if (!worldFinite(point)) return simple(Kind.UNKNOWN);
                         double distance=from.distanceToSqr(point);
-                        if (Math.abs(distance-best) < 1e-8 && (result.shipId()==null || !result.shipId().equals(ship.getUniqueId()) || !pos.equals(result.plotPos()))) return simple(Kind.UNKNOWN);
+                        if (sameDistance(distance, best) && (result.shipId()==null || !result.shipId().equals(ship.getUniqueId()) || !pos.equals(result.plotPos()))) return simple(Kind.UNKNOWN);
                         if (distance < best) {
                             var contact=CombatServices.resolve(level,new TargetId(TargetId.Kind.SABLE,ship.getUniqueId()));
                             if (contact.isEmpty()) return simple(Kind.UNKNOWN);
@@ -102,12 +109,12 @@ public final class SableFirstHit {
                                     : relation != Relation.ENEMY ? Kind.UNKNOWN
                                     : ship.getUniqueId().equals(target.uuid()) && CombatServices.canEngage(level,actor,contact.get()) ? Kind.TARGET : Kind.OTHER_ENEMY;
                             if (!territoryClear(level,actor,point)) kind=Kind.UNKNOWN;
-                            best=distance; result=new Result(kind,ship.getUniqueId(),point,pos,hit.getDirection(),state);
+                            best=distance; result=new Result(kind,ship.getUniqueId(),point,hit.getLocation(),pos,hit.getDirection(),state,queryTick,pose);
                         }
                     }
                 }
             }
-            if (Math.abs(entityDistance-best) < 1e-8) return simple(Kind.UNKNOWN);
+            if (sameDistance(entityDistance, best)) return simple(Kind.UNKNOWN);
             if (entityDistance < best) return simple(entityKind);
             return result;
         } catch (RuntimeException unavailable) { return simple(Kind.UNKNOWN); }
@@ -156,6 +163,10 @@ public final class SableFirstHit {
             var chunk = new net.minecraft.world.level.ChunkPos(BlockPos.containing(point));
             return api.getManager().getChunk(new dev.ftb.mods.ftblibrary.math.ChunkDimPos(level.dimension(), chunk)) == null;
         } catch (RuntimeException unavailable) { return false; }
+    }
+    // A fixed spatial tolerance in blocks, independent of the range of the hit.
+    private static boolean sameDistance(double a, double b) {
+        return Double.isFinite(a) && Double.isFinite(b) && Math.abs(Math.sqrt(a) - Math.sqrt(b)) <= 1e-5;
     }
     private static boolean finite(Vec3 v) { return v != null && Double.isFinite(v.x) && Double.isFinite(v.y) && Double.isFinite(v.z); }
     private static boolean worldFinite(Vec3 v) { return finite(v) && Math.abs(v.x)<30000000 && Math.abs(v.y)<30000000 && Math.abs(v.z)<30000000; }

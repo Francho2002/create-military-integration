@@ -1,5 +1,11 @@
 # Validación realizada
 
+## Ciclo 2C.1
+
+- `clean build` con Java 21 y dependencias fijadas, y las siete regresiones JavaExec: perfiles y contextos NBT, geometría y pose rotada, identidad/cara/bloque del callback, tolerancia y orden de intersecciones aisladas.
+- `Verify-RadarSpearArrowCollision.ps1` contrasta el bytecode NeoForge de `AbstractArrow.tick`: `getLocation`, la comprobación `isRemoved`, `findHitEntity` y sustitución del resultado; también valida el descriptor del wrapper y las APIs de plot Sable. Los verificadores de artefacto, mixins, guiado, lanzamiento Radar Spear y geometría Sable se ejecutaron igualmente.
+- Las pruebas no ejecutan un nivel Minecraft, el servidor ni GameTest; no simulan un `AbstractArrow.tick` con mixins aplicados, entidades reales, poses Sable concurrentes o listeners de protección. La aplicación real del wrapper y la llegada efectiva al callback quedan pendientes de validación integrada.
+
 ## Ciclo 2C
 
 - `clean build` offline, Java 21 y dependencias fijadas: correcto. Las siete regresiones JavaExec incluyen identidad del callback, UUID y cara, rechazo de tipos de obstáculo no autorizados, orden de intersecciones y transformación inversa de una pose rotada, más separación de perfiles y consumo único de NBT.

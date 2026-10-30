@@ -15,6 +15,7 @@
     "missiles.IRSeekerTargetLossMixin",
     "missiles.RadarSpearLaunchMixin",
     "missiles.RadarSpearEntityMixin",
+    "missiles.RadarSpearArrowCollisionMixin",
     "missiles.RadarSpearFlightMixin",
     "safety.RadarBearingMixin",
     "safety.FireControllerPersistenceMixin",
