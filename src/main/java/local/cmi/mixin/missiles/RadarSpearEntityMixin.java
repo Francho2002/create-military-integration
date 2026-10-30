@@ -33,6 +33,6 @@ public abstract class RadarSpearEntityMixin {
     @Inject(method = "onHitBlock", at = @At("HEAD"), cancellable = true)
     private void cmi$avoidNativeBlockExplosion(BlockHitResult hit, CallbackInfo ci) {
         Entity self = (Entity) (Object) this;
-        if (!self.level().isClientSide && RadarSpearMode.managed(self.getPersistentData())) { ci.cancel(); RadarSpearBridge.discard(self); }
+        if (self.level() instanceof ServerLevel server && RadarSpearMode.managed(self.getPersistentData())) { ci.cancel(); RadarSpearBridge.impactBlock(server, self, hit); }
     }
 }

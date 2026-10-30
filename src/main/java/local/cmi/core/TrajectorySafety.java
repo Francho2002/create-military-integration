@@ -66,7 +66,7 @@ public final class TrajectorySafety {
                     // plot holder is authoritative and may be absent while unloading.
                     if (!plot.contains(chunkPos)) continue;
                     try {
-                        var chunk = plot.getChunk(chunkPos);
+                        var chunk = plot.getChunk(plot.toLocal(chunkPos));
                         if (chunk == null || !level.hasChunkAt(pos)) return false;
                         var shape = chunk.getBlockState(pos).getCollisionShape(ship.getLevel(), pos);
                         for (var shapeBox : shape.toAabbs()) {

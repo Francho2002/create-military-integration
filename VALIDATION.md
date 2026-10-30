@@ -1,5 +1,11 @@
 # Validación realizada
 
+## Ciclo 2C
+
+- `clean build` offline, Java 21 y dependencias fijadas: correcto. Las siete regresiones JavaExec incluyen identidad del callback, UUID y cara, rechazo de tipos de obstáculo no autorizados, orden de intersecciones y transformación inversa de una pose rotada, más separación de perfiles y consumo único de NBT.
+- `Verify-SableBytecode.ps1` contrasta `SubLevelContainer.getChunk → LevelPlot.toLocal → getChunk`, los descriptores de pose y control de clip y la llamada de `LevelChunkMixin` a `SableCommonEvents.handleBlockChange`. `Verify-Geometry.ps1` comprueba la conversión y el presupuesto del recorrido. Los verificadores de artefacto, mixins, guiado y Radar Spear se ejecutaron igualmente.
+- No se crearon un mundo ni un servidor. Las comprobaciones de geometría y NBT son aisladas: no simulan realmente chunks descargados, claims, cambios de IFF, jugadores, callbacks de mods, el tick de flecha ni colisiones Sable. Esos escenarios permanecen pendientes de pruebas de integración; la comprobación estática no certifica que los mixins se apliquen ni que el daño funcione en juego.
+
 ## Ciclo 2B
 
 - `clean build` offline, Java 21 y JAR fijados: correcto. Se ejecutaron las seis regresiones JavaExec, incluidas pruebas NBT del perfil, identidad, expiración, cancelación, consumo único, interceptor, marcador malformado y designación incompleta.

@@ -42,6 +42,18 @@ public final class RadarSpearImpactRegression {
         require(!RadarSpearImpact.arm(corrupted, actor, id, launch, 100, false));
         require(!RadarSpearImpact.valid(corrupted, launch, 100));
         require(!RadarSpearImpact.arm(new CompoundTag(), new Actor(null, "", null), id, launch, 100, false));
+        var shipId = new TargetId(TargetId.Kind.SABLE, UUID.randomUUID());
+        CompoundTag shipData = new CompoundTag();
+        require(RadarSpearImpact.arm(shipData, actor, shipId, launch, 100, false));
+        require("direct_sable".equals(shipData.getCompound("cmiRadarImpact").getString("profile")));
+        require(RadarSpearImpact.matches(shipData, launch, 100, actor, shipId, false));
+        require(!RadarSpearImpact.matches(shipData, launch, 100, actor, id, false));
+        require(!RadarSpearImpact.matches(shipData, launch, 100, actor, shipId, true));
+        CompoundTag legacy = shipData.copy();
+        legacy.getCompound("cmiRadarImpact").putString("profile", "direct_living_base");
+        require(RadarSpearImpact.matches(legacy, launch, 100, actor, shipId, false));
+        require(RadarSpearImpact.consume(shipData, launch, 101));
+        require(!RadarSpearImpact.matches(shipData, launch, 101, actor, shipId, false));
         CompoundTag interceptor = new CompoundTag();
         require(RadarSpearImpact.arm(interceptor, actor, id, launch, 100, true));
         require(RadarSpearImpact.interceptor(interceptor, launch, 100));

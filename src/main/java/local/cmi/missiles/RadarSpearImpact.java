@@ -32,7 +32,7 @@ public final class RadarSpearImpact {
         if (actor.platform() != null) context.putUUID("platform", actor.platform());
         context.putUUID("target", target.uuid());
         context.putString("kind", target.kind().name());
-        context.putString("profile", interceptor ? "interceptor" : "direct_living_base");
+        context.putString("profile", interceptor ? "interceptor" : target.kind() == TargetId.Kind.SABLE ? "direct_sable" : "direct_living_base");
         context.putString("status", "active");
         data.put(KEY, context);
         return true;
@@ -51,7 +51,7 @@ public final class RadarSpearImpact {
                 || !c.contains("authorization", Tag.TAG_STRING) || !"designated_enemy".equals(c.getString("authorization"))
                 || !c.contains("iff", Tag.TAG_STRING) || !c.contains("kind", Tag.TAG_STRING)
                 || !c.contains("profile", Tag.TAG_STRING)
-                || !("direct_living_base".equals(c.getString("profile")) || "interceptor".equals(c.getString("profile")))
+                || !("direct_living_base".equals(c.getString("profile")) || "direct_sable".equals(c.getString("profile")) || "interceptor".equals(c.getString("profile")))
                 || !c.contains("status", Tag.TAG_STRING) || !"active".equals(c.getString("status"))
                 || (c.contains("platform") && !c.hasUUID("platform"))) return false;
         try { TargetId.Kind.valueOf(c.getString("kind")); return true; }
@@ -66,7 +66,10 @@ public final class RadarSpearImpact {
                 && java.util.Objects.equals(actor.iff() == null ? "" : actor.iff(), c.getString("iff"))
                 && java.util.Objects.equals(actor.platform(), c.hasUUID("platform") ? c.getUUID("platform") : null)
                 && target.uuid().equals(c.getUUID("target")) && target.kind().name().equals(c.getString("kind"))
-                && (interceptor ? "interceptor" : "direct_living_base").equals(c.getString("profile"));
+                && (interceptor ? "interceptor".equals(c.getString("profile"))
+                    : target.kind() == TargetId.Kind.SABLE
+                        ? ("direct_sable".equals(c.getString("profile")) || "direct_living_base".equals(c.getString("profile")))
+                        : "direct_living_base".equals(c.getString("profile")));
     }
     public static boolean matches(CompoundTag data, UUID missileId, long now, Actor actor, TargetId target) {
         return matches(data, missileId, now, actor, target, interceptor(data, missileId, now));

@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $source = Get-Content -Raw -LiteralPath "$root/src/main/java/local/cmi/core/TrajectorySafety.java"
-foreach ($required in @('transformPositionInverse', 'plot.contains(chunkPos)', 'plot.getChunk(chunkPos)', 'chunk.getBlockState(pos)', 'ship.getLevel()', '--budget[0] < 0', 'inflate(blastRadius + 0.5 + 1.0e-6)')) {
+foreach ($required in @('transformPositionInverse', 'plot.contains(chunkPos)', 'plot.getChunk(plot.toLocal(chunkPos))', 'chunk.getBlockState(pos)', 'ship.getLevel()', '--budget[0] < 0', 'inflate(blastRadius + 0.5 + 1.0e-6)')) {
     if (!$source.Contains($required)) { throw "Missing geometry guard: $required" }
 }
 if ($source.Contains('level.getBlockState(pos)')) { throw 'Plot state must come from its plot chunk' }

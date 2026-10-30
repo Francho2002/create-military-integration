@@ -12,8 +12,10 @@ import net.minecraft.world.phys.Vec3;
 import local.cmi.core.Actor;
 import local.cmi.core.CombatServices;
 import local.cmi.core.MilitaryContact;
+import local.cmi.core.SableFirstHit;
 import local.cmi.core.TargetId;
 import local.cmi.core.TrajectorySafety;
+import net.minecraft.world.phys.BlockHitResult;
 
 /** Server-only adapter for a Radar Spear explicitly armed through its launch block. */
 public final class RadarSpearBridge {
@@ -82,12 +84,31 @@ public final class RadarSpearBridge {
         RadarSpearImpact.cancel(missile.getPersistentData());
         missile.discard();
     }
+    /** The native callback provides the actual block collision; native Warium detonation remains cancelled. */
+    public static void impactBlock(ServerLevel level, Entity missile, BlockHitResult hit) {
+        Vec3 from = missile.position();
+        RadarSpearStructural.impact(level, missile, hit, from, from.add(missile.getDeltaMovement()));
+        discard(missile);
+    }
+    private static boolean allowedPath(ServerLevel level, Actor actor, Entity missile, Vec3 from, Vec3 to) {
+        CompoundTag data = missile.getPersistentData();
+        if (!"SABLE".equals(data.getString("cmiTargetKind")) || !data.hasUUID("cmiTargetId")
+                || RadarSpearImpact.interceptor(data, missile.getUUID(), level.getGameTime()))
+            return TrajectorySafety.clear(level, actor, List.of(from, to), missile.getBbWidth() * 0.5, missile);
+        var target = new TargetId(TargetId.Kind.SABLE, data.getUUID("cmiTargetId"));
+        var first = SableFirstHit.evaluate(level, actor, target, from, to, missile);
+        if (first.kind() == SableFirstHit.Kind.CLEAR)
+            return TrajectorySafety.clear(level, actor, List.of(from, to), missile.getBbWidth() * 0.5, missile)
+                    && SableFirstHit.mainWorldCorridorClear(level, actor, from, to, missile.getBbWidth() * 0.5);
+        return data.getDouble("Time") >= 10 && first.kind() == SableFirstHit.Kind.TARGET
+                && SableFirstHit.corridorClear(level, actor, from, first, missile);
+    }
     /** Check current motion before the native arrow tick can move or collide. */
     public static boolean preflight(ServerLevel level, Entity missile) {
         if (!validManaged(level, missile)) return false;
         CompoundTag t = missile.getPersistentData();
         Actor actor = new Actor(t.getUUID("cmiOwner"), t.getString("cmiIff"), t.hasUUID("cmiPlatform") ? t.getUUID("cmiPlatform") : null);
-        return TrajectorySafety.clear(level, actor, List.of(missile.position(), missile.position().add(missile.getDeltaMovement())), missile.getBbWidth() * 0.5, missile);
+        return allowedPath(level, actor, missile, missile.position(), missile.position().add(missile.getDeltaMovement()));
     }
     public static void tick(ServerLevel level, Entity missile) {
         CompoundTag t = missile.getPersistentData();
@@ -98,7 +119,7 @@ public final class RadarSpearBridge {
         if (time > 130 || missile.isUnderWater()) { discard(missile); return; }
         missile.setNoGravity(true);
         Vec3 motion = missile.getDeltaMovement().scale(1.02);
-        if (!TrajectorySafety.clear(level, actor, List.of(missile.position(), missile.position().add(motion)), missile.getBbWidth() * 0.5, missile)) {
+        if (!allowedPath(level, actor, missile, missile.position(), missile.position().add(motion))) {
             discard(missile); return;
         }
         missile.setDeltaMovement(motion);
@@ -122,7 +143,7 @@ public final class RadarSpearBridge {
         Vec3 desired = delta.add(target.velocity().scale(distance / speed)).scale(speed / distance);
         double limit = 0.03 * speed;
         Vec3 next = new Vec3(clamp(motion.x, (7 * motion.x + desired.x) / 8, limit), clamp(motion.y, (7 * motion.y + desired.y) / 8, limit), clamp(motion.z, (7 * motion.z + desired.z) / 8, limit));
-        if (!TrajectorySafety.clear(level, actor, List.of(missile.position(), missile.position().add(next)), missile.getBbWidth() * 0.5, missile)) { discard(missile); return; }
+        if (!allowedPath(level, actor, missile, missile.position(), missile.position().add(next))) { discard(missile); return; }
         missile.setDeltaMovement(next);
     }
     private static double clamp(double old, double next, double limit) { return Math.min(old + limit, Math.max(old - limit, next)); }
