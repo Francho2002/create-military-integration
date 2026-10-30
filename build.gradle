@@ -32,6 +32,9 @@ sourceJars.each { jar ->
     }
 }
 dependencies { compileOnly files(sourceJars); compileOnly files(nestedFiles) }
+// Exercise NBT directly on the development classpath without starting Minecraft.
+sourceSets.test.compileClasspath += sourceSets.main.compileClasspath
+sourceSets.test.runtimeClasspath += sourceSets.main.compileClasspath
 tasks.register('extractCompileApis') {
     inputs.files(sourceJars)
     outputs.files(nestedFiles)
@@ -59,5 +62,23 @@ tasks.register('verifyDependencies') {
     }
 }
 tasks.named('compileJava') { dependsOn 'verifyDependencies', 'extractCompileApis' }
+tasks.register('guidanceModeRegression', JavaExec) {
+    dependsOn 'testClasses'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'local.cmi.missiles.GuidanceModeRegression'
+}
+tasks.register('managedGuidanceNbtRegression', JavaExec) {
+    dependsOn 'testClasses'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'local.cmi.missiles.ManagedGuidanceDataRegression'
+}
+tasks.register('geometryIntersectionRegression', JavaExec) {
+    dependsOn 'testClasses'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'local.cmi.core.GeometryIntersectionRegression'
+}
+// Regression entry points run as JavaExec above; this project has no JUnit engine.
+tasks.named('test', Test) { failOnNoDiscoveredTests = false }
+tasks.named('check') { dependsOn 'guidanceModeRegression', 'managedGuidanceNbtRegression', 'geometryIntersectionRegression' }
 tasks.register('forbidGameExecution') { doLast { throw new GradleException('Game execution disabled in this development project.') } }
 tasks.matching { it.name.startsWith('run') }.configureEach { dependsOn 'forbidGameExecution' }

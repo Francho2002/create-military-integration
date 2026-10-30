@@ -61,6 +61,7 @@ public final class LauncherCoordinator {
             var blockEntity = BlockEntity.loadStatic(info.pos(), info.state(), info.nbt().copy(), level.registryAccess());
             if (!(blockEntity instanceof InfraredSeekerGuidanceBlockEntity)) return;
             var data = blockEntity.getPersistentData();
+            data.putBoolean("cmiManagedGuidance", true);
             data.putBoolean("cmiDesignated", true);
             data.putBoolean("cmiInterceptor", interceptor);
             data.putUUID("cmiTargetId", contact.id().uuid());

@@ -25,6 +25,7 @@ import local.cmi.core.Actor;
 import local.cmi.core.MilitaryContact;
 import local.cmi.core.TargetId;
 import local.cmi.core.TrajectorySafety;
+import local.cmi.missiles.ManagedGuidanceData;
 import rbasamoyai.createbigcannons.cannon_control.contraption.PitchOrientedContraptionEntity;
 import riftyboi.cbcmodernwarfare.munitions.contraptions.MunitionsPhysicsContraptionEntity;
 import riftyboi.cbcmodernwarfare.munitions.munitions_contraption_launcher.guidance.infrared_homing.InfraredSeekerGuidanceBlock;
@@ -40,18 +41,35 @@ public abstract class InfraredGuidanceMixin {
     private static final String KIND = "cmiTargetKind";
 
     private CompoundTag cmi$data() { return ((BlockEntity) (Object) this).getPersistentData(); }
-    private void cmi$clear() { cmi$data().remove(ID); cmi$data().remove(KIND); isLockedOn = false; trackedEntityId = -1; }
+    /** Explicit opt-in only. Ownership alone is used for attribution and is not consent to replace guidance. */
+    private boolean cmi$managed() {
+        CompoundTag data = cmi$data();
+        return ManagedGuidanceData.managed(data);
+    }
+    private void cmi$clear() {
+        ManagedGuidanceData.clearTarget(cmi$data());
+        isLockedOn = false; trackedEntityId = -1;
+    }
     private Optional<TargetId> cmi$id() {
-        CompoundTag tag = cmi$data();
-        if (!tag.hasUUID(ID)) return Optional.empty();
-        try { return Optional.of(new TargetId(TargetId.Kind.valueOf(tag.getString(KIND)), tag.getUUID(ID))); }
-        catch (IllegalArgumentException e) { return Optional.empty(); }
+        return ManagedGuidanceData.target(cmi$data());
+    }
+    private void cmi$abortFlight(ServerLevel server, MunitionsPhysicsContraptionEntity missile) {
+        CompoundTag data = cmi$data();
+        cmi$id().ifPresent(id -> {
+            CombatServices.release(server, id, missile.getUUID());
+            if (data.hasUUID("cmiLaunchLease")) CombatServices.release(server, id, data.getUUID("cmiLaunchLease"));
+        });
+        data.remove("cmiLaunchLease");
+        cmi$clear();
+        missile.discard();
     }
 
     @Inject(method = "tickGuidance", at = @At("HEAD"), cancellable = true, remap = false)
     private void cmi$acquire(Level level, BlockPos localPos, BlockState state, BlockEntity blockEntity, OrientedContraptionEntity carrier, CallbackInfo ci) {
+        if (!cmi$managed()) return;
         ci.cancel();
         if (!(level instanceof ServerLevel server) || !(state.getBlock() instanceof InfraredSeekerGuidanceBlock seeker)) return;
+        if (!ManagedGuidanceData.validMode(cmi$data())) { cmi$clear(); return; }
         // The projectile keeps its launch designation. Never silently switch to a new target in flight.
         if (carrier instanceof MunitionsPhysicsContraptionEntity) return;
         Actor actor = CombatServices.actor(server, carrier);
@@ -95,27 +113,28 @@ public abstract class InfraredGuidanceMixin {
 
     @Inject(method = "guideEntity", at = @At("HEAD"), cancellable = true, remap = false)
     private void cmi$guide(MunitionsPhysicsContraptionEntity missile, BlockState state, CallbackInfo ci) {
+        if (!cmi$managed()) return;
         ci.cancel();
-        if (!(missile.level() instanceof ServerLevel server) || !(state.getBlock() instanceof InfraredSeekerGuidanceBlock seeker)) return;
+        if (!(missile.level() instanceof ServerLevel server)) return;
+        if (!(state.getBlock() instanceof InfraredSeekerGuidanceBlock seeker)) { cmi$abortFlight(server, missile); return; }
+        if (!ManagedGuidanceData.validMode(cmi$data())) { cmi$abortFlight(server, missile); return; }
         CompoundTag tag = cmi$data();
-        if (!tag.hasUUID("cmiOwner")) { cmi$clear(); return; }
+        if (!tag.hasUUID("cmiOwner")) { cmi$abortFlight(server, missile); return; }
         Actor actor = new Actor(tag.getUUID("cmiOwner"), tag.getString("cmiIff"), tag.hasUUID("cmiPlatform") ? tag.getUUID("cmiPlatform") : null);
         missile.getPersistentData().putUUID("cmiOwner", actor.owner());
         missile.getPersistentData().putString("cmiIff", actor.iff());
         if (actor.platform() != null) missile.getPersistentData().putUUID("cmiPlatform", actor.platform());
         Optional<MilitaryContact> found = cmi$id().flatMap(id -> CombatServices.resolve(server, id));
         boolean interceptor = tag.getBoolean("cmiInterceptor");
-        if (actor.owner() == null || found.isEmpty() || (interceptor ? !found.get().projectile() : !found.get().hot()) || !CombatServices.canEngage(server, actor, found.get())) { cmi$clear(); return; }
+        if (actor.owner() == null || found.isEmpty() || (interceptor ? !found.get().projectile() : !found.get().hot()) || !CombatServices.canEngage(server, actor, found.get())) { cmi$abortFlight(server, missile); return; }
         MilitaryContact target = found.get();
         if (!TrajectorySafety.clear(server, actor, List.of(missile.position(), missile.position().add(missile.getDeltaMovement())), missile.getBbWidth() * 0.5, missile)) {
-            if (interceptor) CombatServices.release(server, target.id(), missile.getUUID());
-            cmi$clear(); missile.discard(); return;
+            cmi$abortFlight(server, missile); return;
         }
         Vec3 offset = target.position().subtract(missile.position());
         double range = seeker.getRange();
         if (offset.lengthSqr() > range * range || server.clip(new ClipContext(missile.position(), target.position(), ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, missile)).getType() != HitResult.Type.MISS) {
-            if (interceptor) CombatServices.release(server, target.id(), missile.getUUID());
-            cmi$clear();
+            cmi$abortFlight(server, missile);
             return;
         }
         if (interceptor) {
@@ -123,7 +142,7 @@ public abstract class InfraredGuidanceMixin {
                 CombatServices.release(server, target.id(), tag.getUUID("cmiLaunchLease"));
                 tag.remove("cmiLaunchLease");
             }
-            if (!CombatServices.reserve(server, target.id(), missile.getUUID(), 2)) { cmi$clear(); return; }
+            if (!CombatServices.reserve(server, target.id(), missile.getUUID(), 2)) { cmi$abortFlight(server, missile); return; }
             if ((missile.getBoundingBox().intersects(target.bounds()) || target.bounds().inflate(missile.getBbWidth() * 0.5).clip(missile.position().subtract(missile.getDeltaMovement()), missile.position()).isPresent()) && !CombatServices.isProtected(server, actor, target.position())) {
                 if (CombatServices.neutralize(server, actor, target)) {
                     CombatServices.release(server, target.id(), missile.getUUID());
@@ -139,7 +158,7 @@ public abstract class InfraredGuidanceMixin {
 
         if (!Double.isFinite(speed) || speed < 1.0e-6 || offset.lengthSqr() < 1.0e-12) return;
         Vec3 direction = motion.scale(1 / speed);
-        if (direction.dot(offset.normalize()) < Math.cos(Math.toRadians(seeker.trackFov() / 2))) { cmi$clear(); return; }
+        if (direction.dot(offset.normalize()) < Math.cos(Math.toRadians(seeker.trackFov() / 2))) { cmi$abortFlight(server, missile); return; }
         double lead = offset.length() / speed;
         Vec3 aim = offset.add(target.velocity().scale(lead)).normalize();
         double turn = Math.max(0, Math.min(1, calculateTurningSpeed(missile.getContraption().getBlocks().size(), speed, state)));
@@ -147,8 +166,7 @@ public abstract class InfraredGuidanceMixin {
         if (steered.lengthSqr() > 1.0e-12) {
             Vec3 next = steered.normalize().scale(speed);
             if (!TrajectorySafety.clear(server, actor, List.of(missile.position(), missile.position().add(next)), missile.getBbWidth() * 0.5, missile)) {
-                if (interceptor) CombatServices.release(server, target.id(), missile.getUUID());
-                cmi$clear(); missile.discard(); return;
+                cmi$abortFlight(server, missile); return;
             }
             missile.setContraptionMotion(next);
         }

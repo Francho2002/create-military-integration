@@ -1,6 +1,7 @@
 package local.cmi.mixin.missiles;
 
 import net.minecraft.world.entity.Entity;
+import local.cmi.missiles.ManagedGuidanceData;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
@@ -15,6 +16,8 @@ public abstract class IRSeekerTargetLossMixin {
     @Inject(method = "tick", at = @At("HEAD"))
     private void cmi$forgetLostTarget(CallbackInfo ci) {
         Entity self = (Entity) (Object) this;
+        var data = self.getPersistentData();
+        if (!ManagedGuidanceData.managed(data)) return;
         if (!self.level().isClientSide && target != null && (target.isRemoved() || !target.isAlive())) target = null;
     }
 }

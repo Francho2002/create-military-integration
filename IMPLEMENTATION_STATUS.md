@@ -2,6 +2,16 @@
 
 Esta tabla describe el código, no una prueba dentro de Minecraft. Compilación no demuestra aplicación correcta de mixins.
 
+## Ciclo 1: guiado IR y geometría Sable
+
+- **Defecto confirmado:** los hooks `InfraredGuidanceMixin.cmi$acquire` y `cmi$guide` cancelaban siempre `tickGuidance` y `guideEntity`, incluso para buscadores sin control de CMI. El indicador `cmiOwner` es atribución y no autoriza sustituir el guiado. Ahora se reconoce un indicador explícito persistente `cmiManagedGuidance`, además de `cmiDesignated` y `cmiInterceptor` como modos existentes. El lanzador CMI escribe el indicador en el NBT del buscador antes del lanzamiento. Un NBT de modo malformado mantiene el control conservador de CMI.
+- Al perder la designación, se conserva el indicador de modo para impedir el retorno silencioso a la adquisición nativa. En vuelo, un blanco inválido o perdido, el propietario ausente o la pérdida de autorización provocan la liberación de reservas identificables y `discard()` del misil administrado. El bytecode revisado no muestra una llamada directa a `detonate` desde esa eliminación, pero los efectos indirectos de `Contraption.stop()` aún requieren comprobación en juego. `IRSeekerTargetLossMixin` también limita su intervención a estados explícitamente administrados. Los casos sin indicador conservan los métodos nativos y no requieren `cmiOwner`.
+- **Defecto confirmado:** la búsqueda de naves consultaba una caja mundial sin ampliar por el radio de seguridad, aunque luego ampliaba sus formas de colisión; podía omitir una estructura cercana. La consulta de estado tampoco acreditaba el `LevelPlot` de la nave. Ahora `TrajectorySafety.clear` amplía la búsqueda mundial, invierte la pose al espacio de plot, verifica `plot.contains` y obtiene `plot.getChunk`; el estado procede de ese `LevelChunk` y la forma se evalúa en el `ServerLevel` padre de Sable. Chunk ausente, geometría inválida o presupuesto agotado rechazan el tiro.
+- El código conserva el control de entidades, IFF, zonas FTB y MineColonies y continúa evaluando la trayectoria tras geometría enemiga penetrable. El límite de 12.000 operaciones sigue vigente.
+- La búsqueda local divide segmentos largos en tramos contiguos para evitar una caja cúbica excesiva en diagonales; cada tramo conserva el margen completo y comparte el presupuesto. También comprueba los extremos dentro de una forma antes del raycast, ya que `AABB.clip` puede omitir un segmento que comienza dentro.
+- Los plots son regiones de chunks reservados del mundo padre, no un `Level` independiente. Comprobar el plot resulta necesario para no confundir coordenadas del plot con bloques de otro almacenamiento. La semántica de `getLevel`, `getPlot`, `contains`, `getChunk` y `transformPositionInverse` fue contrastada con el bytecode de Sable fijado.
+- **Pendiente:** la aplicación real de los mixins, el traslado del NBT durante el lanzamiento, el comportamiento de chunks de plot durante carga/descarga y las colisiones rotadas requieren validación en una JVM de Minecraft. La inspección estática no demuestra que un disparo sea seguro en todas las maniobras.
+
 | Área | Implementado | Limitaciones |
 |---|---|---|
 | Build | Gradle, JDK 21, NeoForge 21.1.265, hashes de dependencias, JAR y fuentes | Requiere originales externos; no redistribuye mods |

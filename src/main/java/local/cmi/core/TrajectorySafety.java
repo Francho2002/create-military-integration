@@ -36,24 +36,47 @@ public final class TrajectorySafety {
                 if (!level.hasChunkAt(BlockPos.containing(p)) || CombatServices.isProtected(level, actor, p)) return false;
             }
             if (level.clip(new ClipContext(from, to, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, CollisionContext.empty())).getType() != HitResult.Type.MISS) return false;
-            AABB box = new AABB(from, to).inflate(1.0e-6);
+            AABB box = new AABB(from, to).inflate(blastRadius + 0.5 + 1.0e-6);
             var query = new BoundingBox3d(box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ);
             for (var ship : container.queryIntersecting(query)) {
                 if (ship.isRemoved()) continue;
+                if (ship.getLevel() != level) return false;
+                var plot = ship.getPlot();
+                if (plot == null) return false;
+                if (ship.logicalPose() == null) return false;
                 Vec3 a = ship.logicalPose().transformPositionInverse(from);
                 Vec3 b = ship.logicalPose().transformPositionInverse(to);
                 if (!finite(a) || !finite(b)) return false;
-                int x0 = (int)Math.floor(Math.min(a.x, b.x)) - 1, x1 = (int)Math.floor(Math.max(a.x, b.x)) + 1;
-                int y0 = (int)Math.floor(Math.min(a.y, b.y)) - 1, y1 = (int)Math.floor(Math.max(a.y, b.y)) + 1;
-                int z0 = (int)Math.floor(Math.min(a.z, b.z)) - 1, z1 = (int)Math.floor(Math.max(a.z, b.z)) + 1;
+                int divisions;
+                try { divisions = PlotGeometryBounds.subdivisions(a.x, a.y, a.z, b.x, b.y, b.z); }
+                catch (IllegalArgumentException ex) { return false; }
                 var contact = CombatServices.resolve(level, new TargetId(TargetId.Kind.SABLE, ship.getUniqueId()));
                 boolean enemy = contact.isPresent() && CombatServices.canEngage(level, actor, contact.get());
-                for (int x = x0; x <= x1; x++) for (int y = y0; y <= y1; y++) for (int z = z0; z <= z1; z++) {
+                for (int segment = 0; segment < divisions; segment++) {
+                  Vec3 start = a.lerp(b, (double)segment / divisions);
+                  Vec3 end = a.lerp(b, (double)(segment + 1) / divisions);
+                  PlotGeometryBounds bounds;
+                  try { bounds = PlotGeometryBounds.around(start.x, start.y, start.z, end.x, end.y, end.z, blastRadius); }
+                  catch (IllegalArgumentException ex) { return false; }
+                  for (int x = bounds.x0(); x <= bounds.x1(); x++) for (int y = bounds.y0(); y <= bounds.y1(); y++) for (int z = bounds.z0(); z <= bounds.z1(); z++) {
                     if (--budget[0] < 0) return false;
                     BlockPos pos = new BlockPos(x, y, z);
-                    if (!level.hasChunkAt(pos)) return false;
-                    var shape = level.getBlockState(pos).getCollisionShape(level, pos);
-                    if (!shape.isEmpty()&&!enemy)for(var shapeBox:shape.toAabbs())if(shapeBox.move(pos).inflate(blastRadius+0.5).clip(a,b).isPresent())return false;
+                    var chunkPos = new net.minecraft.world.level.ChunkPos(pos);
+                    // Plot coordinates occupy reserved chunks of the parent ServerLevel; the
+                    // plot holder is authoritative and may be absent while unloading.
+                    if (!plot.contains(chunkPos)) continue;
+                    try {
+                        var chunk = plot.getChunk(chunkPos);
+                        if (chunk == null || !level.hasChunkAt(pos)) return false;
+                        var shape = chunk.getBlockState(pos).getCollisionShape(ship.getLevel(), pos);
+                        for (var shapeBox : shape.toAabbs()) {
+                            boolean intersects = GeometryIntersection.intersects(shapeBox.move(pos).inflate(blastRadius + 0.5), a, b);
+                            if (PlotGeometryBounds.blocks(enemy, intersects)) return false;
+                        }
+                    } catch (RuntimeException unavailableGeometry) {
+                        return false;
+                    }
+                  }
                 }
                 // Enemy solids may be penetrated; always inspect the rest of the path.
             }
