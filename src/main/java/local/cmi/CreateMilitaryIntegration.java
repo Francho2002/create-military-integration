@@ -17,19 +17,20 @@ public final class CreateMilitaryIntegration {
     public CreateMilitaryIntegration(){NeoForge.EVENT_BUS.addListener(this::commands);NeoForge.EVENT_BUS.addListener(this::stopped);NeoForge.EVENT_BUS.addListener(this::spawned);NeoForge.EVENT_BUS.addListener(this::explosion);}
     private void explosion(net.neoforged.neoforge.event.level.ExplosionEvent.Detonate event){
         if(!(event.getLevel() instanceof net.minecraft.server.level.ServerLevel level))return;
-        var source=event.getExplosion().getDirectSourceEntity();if(source==null||!CombatServices.projectile(source)||!source.getPersistentData().hasUUID("cmiOwner"))return;
+        var source=event.getExplosion().getDirectSourceEntity();if(source==null||!CombatServices.projectile(source)||!(source.getPersistentData().getBoolean("cmiManagedShot")||source.getPersistentData().getBoolean("cmiManaged")))return;
+        if(!source.getPersistentData().hasUUID("cmiOwner")){event.getAffectedEntities().clear();event.getAffectedBlocks().clear();return;}
         var actor=CombatServices.actor(level,source);
         for(var target:java.util.List.copyOf(event.getAffectedEntities())){
             if(target==source||!CombatServices.projectile(target))continue;
             var contact=CombatServices.resolve(level,new TargetId(TargetId.Kind.ENTITY,target.getUUID()));
-            if(contact.isPresent()&&CombatServices.canEngage(level,actor,contact.get())&&net.minecraft.world.level.Explosion.getSeenPercent(event.getExplosion().center(),target)>0)CombatServices.neutralize(level,actor,contact.get());
+            if(contact.isPresent()&&CombatServices.canEngage(level,actor,contact.get())&&net.minecraft.world.level.Explosion.getSeenPercent(event.getExplosion().center(),target)>0&&CombatServices.neutralize(level,actor,contact.get())) event.getAffectedEntities().remove(target);
         }
-        event.getAffectedEntities().removeIf(target->{var contact=CombatServices.resolve(level,new TargetId(TargetId.Kind.ENTITY,target.getUUID()));return contact.isPresent()&&CombatServices.relation(level,actor,contact.get())!=Relation.ENEMY;});
+        event.getAffectedEntities().removeIf(target->{var contact=CombatServices.resolve(level,new TargetId(TargetId.Kind.ENTITY,target.getUUID()));return contact.isEmpty()||CombatServices.relation(level,actor,contact.get())!=Relation.ENEMY;});
         event.getAffectedBlocks().removeIf(pos->CombatServices.isProtected(level,actor,net.minecraft.world.phys.Vec3.atCenterOf(pos)));
     }
     private void spawned(net.neoforged.neoforge.event.entity.EntityJoinLevelEvent event){
         var actor=ShotContext.current();if(!(event.getLevel() instanceof net.minecraft.server.level.ServerLevel)||actor==null||actor.owner()==null||!CombatServices.projectile(event.getEntity()))return;
-        var t=event.getEntity().getPersistentData();t.putUUID("cmiOwner",actor.owner());t.putString("cmiIff",actor.iff()==null?"":actor.iff());if(actor.platform()!=null)t.putUUID("cmiPlatform",actor.platform());
+        var t=event.getEntity().getPersistentData();if(ShotContext.managed())t.putBoolean("cmiManagedShot",true);t.putUUID("cmiOwner",actor.owner());t.putString("cmiIff",actor.iff()==null?"":actor.iff());if(actor.platform()!=null)t.putUUID("cmiPlatform",actor.platform());
     }
     private void stopped(ServerStoppedEvent event){CombatServices.clear();}
     private void commands(RegisterCommandsEvent e){

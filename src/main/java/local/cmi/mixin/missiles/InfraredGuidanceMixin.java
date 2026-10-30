@@ -121,6 +121,7 @@ public abstract class InfraredGuidanceMixin {
         CompoundTag tag = cmi$data();
         if (!tag.hasUUID("cmiOwner")) { cmi$abortFlight(server, missile); return; }
         Actor actor = new Actor(tag.getUUID("cmiOwner"), tag.getString("cmiIff"), tag.hasUUID("cmiPlatform") ? tag.getUUID("cmiPlatform") : null);
+        missile.getPersistentData().putBoolean("cmiManagedShot", true);
         missile.getPersistentData().putUUID("cmiOwner", actor.owner());
         missile.getPersistentData().putString("cmiIff", actor.iff());
         if (actor.platform() != null) missile.getPersistentData().putUUID("cmiPlatform", actor.platform());

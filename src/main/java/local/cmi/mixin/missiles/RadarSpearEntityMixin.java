@@ -9,22 +9,29 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import local.cmi.missiles.RadarSpearBridge;
+import local.cmi.missiles.RadarSpearMode;
 
 @Mixin(targets = "com.wariumce.entity.RadarSpearMissileProjectileEntity", remap = false)
 public abstract class RadarSpearEntityMixin {
-    @Inject(method = "tick", at = @At("HEAD"))
+    @Inject(method = "tick", at = @At("HEAD"), cancellable = true)
     private void cmi$identifyLaunch(CallbackInfo ci) {
         Entity self = (Entity) (Object) this;
-        if (self.level() instanceof ServerLevel server) RadarSpearBridge.initialize(server, self);
+        if (self.level() instanceof ServerLevel server) {
+            RadarSpearBridge.initialize(server, self);
+            if (self.isRemoved()) ci.cancel();
+        }
     }
     @Inject(method = "onHitEntity", at = @At("HEAD"), cancellable = true)
     private void cmi$avoidNativeEntityExplosion(EntityHitResult hit, CallbackInfo ci) {
         Entity self = (Entity) (Object) this;
-        if (!self.level().isClientSide && self.getPersistentData().getBoolean("cmiManaged")) ci.cancel();
+        if (self.level() instanceof ServerLevel server && RadarSpearMode.managed(self.getPersistentData())) {
+            ci.cancel();
+            RadarSpearBridge.impactEntity(server, self, hit.getEntity());
+        }
     }
     @Inject(method = "onHitBlock", at = @At("HEAD"), cancellable = true)
     private void cmi$avoidNativeBlockExplosion(BlockHitResult hit, CallbackInfo ci) {
         Entity self = (Entity) (Object) this;
-        if (!self.level().isClientSide && self.getPersistentData().getBoolean("cmiManaged")) { ci.cancel(); self.discard(); }
+        if (!self.level().isClientSide && RadarSpearMode.managed(self.getPersistentData())) { ci.cancel(); self.discard(); }
     }
 }

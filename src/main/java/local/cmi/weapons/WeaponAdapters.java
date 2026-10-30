@@ -114,7 +114,7 @@ public final class WeaponAdapters {
     /** Caller must apply its authorization, friendly-fire and trajectory checks first. */
     public static boolean fire(ServerLevel level, PitchOrientedContraptionEntity entity) {
         if (entity.level() != level || !(entity.getContraption() instanceof AbstractMountedCannonContraption cannon)) return false;
-        cannon.fireShot(level, entity);
+        local.cmi.core.ShotContext.runManaged(() -> cannon.fireShot(level, entity));
         return true; // dispatched; the cannon itself may reject a shot
     }
 

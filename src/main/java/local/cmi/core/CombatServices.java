@@ -50,7 +50,7 @@ public final class CombatServices {
         if(c.owner()!=null){if(Iff.playerId(l,allegiance,c.owner())==Iff.Side.FRIEND)return Relation.FRIEND;return CmiData.get(l).enemy(a.owner(),c.owner())?Relation.ENEMY:Relation.NEUTRAL;}
         if(c.id().kind()==TargetId.Kind.ENTITY&&l.getEntity(c.id().uuid()) instanceof Enemy)return Relation.ENEMY;return Relation.UNKNOWN;
     }
-    public static boolean canEngage(ServerLevel l,Actor a,MilitaryContact c){return resolve(l,c.id()).isPresent()&&relation(l,a,c)==Relation.ENEMY&&!isProtected(l,a,c.position());}
+    public static boolean canEngage(ServerLevel l,Actor a,MilitaryContact c){var current=resolve(l,c.id());return current.isPresent()&&relation(l,a,current.get())==Relation.ENEMY&&!isProtected(l,a,current.get().position());}
     public static boolean isProtected(ServerLevel l,Actor a,Vec3 p){server(l);if(!l.hasChunkAt(BlockPos.containing(p)))return true;
         if(net.neoforged.fml.ModList.get().isLoaded("minecolonies")&&com.minecolonies.api.colony.IColonyManager.getInstance().isCoordinateInAnyColony(l,BlockPos.containing(p)))return true;
         var side=Iff.claim(l,Iff.Allegiance.of(l,a.owner(),"",List.of(),a.iff()==null?"":a.iff()),new net.minecraft.world.level.ChunkPos(BlockPos.containing(p)));return side==Iff.Side.FRIEND;}

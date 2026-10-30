@@ -2,6 +2,24 @@
 
 Esta tabla describe el código, no una prueba dentro de Minecraft. Compilación no demuestra aplicación correcta de mixins.
 
+## Ciclo 2: impactos y explosiones
+
+**Resultado parcial:** las explosiones automáticas de las familias prioritarias siguen bloqueadas. No se ha acreditado un volumen seguro que incluya fragmentos, mutaciones privadas y fuerzas Sable, ni se ha implementado un impacto explosivo seguro sobre una aeronave. No se añade una segunda explosión ni una fuerza artificial.
+
+| Munición | Impacto nativo | Daño Sable | Adaptación CMI | Automatización |
+|---|---|---|---|---|
+| Radar Spear Warium | `RadarSpearMissileProjectileEntity.onHitEntity/onHitBlock` llama a la flecha y luego a `TankFireProjectileHitsBlockProcedure`, que ejecuta efectos propios y programa fragmentos y `SmallExplosionProcedure` | Colisión y daño estructural completos **no acreditados** | `RadarSpearBridge.initialize/impactEntity` y `RadarSpearEntityMixin`: estado gestionado únicamente tras validar; impacto gestionado cancela efectos nativos, neutraliza solo proyectil hostil designado cuando corresponde y descarta el misil. Contra bloques y otras entidades descarta sin explosión | Guiado condicionado; impacto explosivo **bloqueado**, por lo que no equivale a daño de ojiva |
+| Neo Warfare, lanzador con AP Shot o Solid Shot CBC | `tickWarheads`/`clipAndDamage` gestionan ojiva e impacto de contraption | Integración CBC/Sable de impactos y fuerzas presente; recorrido completo de esta contraption **no acreditado** | `LauncherSupport.inspect` acepta únicamente clases inertes concretas y el guiado permitido | **Condicionada** a selección, IFF, geometría y carga; sin prueba en juego |
+| Neo Warfare, HEAP / HEF | `HEAPShellProjectile.detonate` usa `HEAPExplosion` y ráfaga HEAP; `HEFShellProjectile.detonate` usa `ShellExplosion` y fragmentación | CBC/Sable integra fuerzas y colisiones; propagación completa y seguridad de cada efecto **no acreditadas** | No se vuelve a ejecutar la explosión nativa ni se inventa un radio | **Bloqueada**: los valores configurables de potencia no son un límite seguro de fragmentación/daño |
+| Otras ojivas CBC y municiones de CBC: Warium Projectiles | Según clase, pueden usar espoletas CBC o procedimientos Warium distintos; `IRSeekerBCProjectile` llama a `ArtilleryHitProcedure`, `MediumBombBCProjectile` a `MediumExplosionProcedure` | Impactos CBC tienen integración Sable; los efectos privados de Warium no quedan acreditados por ello | Sin adaptación explosiva adicional en este ciclo | **Bloqueada** si no figura en la lista explícita inerte; efectos especiales pendientes de revisión individual |
+
+`CombatServices.canEngage` vuelve a resolver el contacto y comprueba su posición y relación actuales antes de autorizar una neutralización. La atribución `cmiOwner` no identifica por sí sola un disparo gestionado: `CreateMilitaryIntegration.explosion/spawned`, `ShotContext` y `CannonInterceptionMixin` distinguen la marca de gestión explícita. El contexto se propaga para disparos síncronos efectuados por `WeaponAdapters.fire`; los pulsos diferidos de Better Targeting no quedan acreditados como marcados por ese contexto.
+
+La decisión de Radar Spear se toma en el primer tick usando `LX/LY/LZ` y el bloque del lanzador. Warium copia NBT al sustituir el hardpoint, pero atrapa errores durante esa copia. Si las coordenadas o el bloque ya no están disponibles, CMI no puede acreditar que fuera un candidato y conserva la ruta nativa: la propagación de la configuración del lanzador todavía no está garantizada. La copia NBT de las regresiones es en memoria, no un lanzamiento real.
+
+Los eventos `ExplosionEvent.Detonate` solo cubren explosiones que realmente los emiten y conservan una entidad fuente marcada. Los procedimientos Warium pueden modificar bloques, crear fragmentos y programar trabajo por otras rutas, incluso sin fuente; filtrar el evento no protege esos efectos ni demuestra protección de todas las fuerzas Sable. La neutralización de CMI sigue siendo no explosiva y limitada a un contacto hostil identificado.
+
+
 ## Ciclo 1: guiado IR y geometría Sable
 
 - **Defecto confirmado:** los hooks `InfraredGuidanceMixin.cmi$acquire` y `cmi$guide` cancelaban siempre `tickGuidance` y `guideEntity`, incluso para buscadores sin control de CMI. El indicador `cmiOwner` es atribución y no autoriza sustituir el guiado. Ahora se reconoce un indicador explícito persistente `cmiManagedGuidance`, además de `cmiDesignated` y `cmiInterceptor` como modos existentes. El lanzador CMI escribe el indicador en el NBT del buscador antes del lanzamiento. Un NBT de modo malformado mantiene el control conservador de CMI.
@@ -25,7 +43,7 @@ Esta tabla describe el código, no una prueba dentro de Minecraft. Compilación 
 | Guiado IR Neo | Adquisición hostil/caliente, identidad en NBT, transferencia, corrección nativa, pérdida segura | Depende de que el flujo de munición preserve NBT; no validado jugando |
 | Radar Spear | Puente optativo al contrato existente, identidad estable, movimiento gestionado y exclusión de destrucción indiscriminada | Impactos explosivos gestionados desactivados; no equivale a daño aire-aire contra aeronaves |
 | Intercepción CBC | Exclusión limitada de la protección de colisión para amenazas identificadas, neutralización sin explosión | Selección/tiro dependen de filtros y perfil autorizado; no convierte cualquier entidad en interceptable |
-| Explosiones atribuidas | Evento NeoForge de detonación: amenazas soportadas y hostiles con exposición pueden neutralizarse; se excluyen entidades no hostiles y bloques protegidos de las listas del evento | Solo explosiones que pasan por este evento y conservan atribución CMI; no acredita explosiones privadas de cada mod |
+| Explosiones gestionadas | Evento NeoForge de detonación: amenazas soportadas y hostiles con exposición pueden neutralizarse; se excluyen entidades no hostiles y bloques protegidos de las listas del evento | Solo explosiones que pasan por este evento y conservan marca y atribución CMI; no acredita explosiones privadas de cada mod ni fuerzas calculadas por rutas ajenas |
 | Misil contra misil | Modo IR optativo, amenaza entrante, reserva previa, transferencia de reserva y contacto barrido | Neutralización no explosiva; configuración nativa y gestión de blanco deben comprobarse en juego |
 | Warium CBC | Inspección de parámetros de arma distinta y limpieza de buscador IR tras perder entidad | Su trayectoria de flecha especial no se presenta como CBC estándar ni queda automatizada por el perfil genérico |
 | CIWS Warium | Comportamiento hostil original conservado | No se añade unidad controlable; defensa cercana se canaliza mediante cañones compatibles |
