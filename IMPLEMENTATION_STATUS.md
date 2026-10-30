@@ -2,6 +2,15 @@
 
 Esta tabla describe el código, no una prueba dentro de Minecraft. Compilación no demuestra aplicación correcta de mixins.
 
+## Ciclo 2E.2: validación runtime pausada por reinicio seguro
+
+- HEAD remoto actual: `d46a7cb0d4783a1160a284fbcda372b0a0471154`. Tiene el mismo árbol de código del ciclo 2E.1 solicitado como `0d736ea701724765a7590fc0deee7dd518c6d0f9`; solo se reescribió el mensaje del commit a español.
+- Se confirmó de nuevo que PID 6016 ejecuta Java desde `C:\Users\panch\Documents\MinecraftProfiles\CMI-Cycle-2E-Test\server`, con argumentos NeoForge 21.1.265. Su padre es `cmd.exe`, pero no hay ventana de consola visible/accesible; `enable-rcon=false`.
+- No se detuvo el proceso ni se reemplazó el JAR activo. El JAR de la carpeta de prueba tiene SHA-256 `5FB3397CAB1760F5367A5F0F8701949D9BCD4F31B3617060FE2E2F0FEE431333`; el artefacto de HEAD tiene SHA-256 `CF00AA0E5E9B9249B508C0CF1264B2ACC615F440A764D80B2C4A0C0180F84AA3`. El servidor debe apagarse normalmente antes de sustituirlo.
+- **ACREDITADO EN JUEGO:** solo los hechos históricos de 2E: arranque hasta `Done`, cliente dentro, CMI cargado y ensamblado Sable. No se ejecutaron los nuevos comandos con el artefacto de HEAD ni hubo lanzamiento en esta reanudación.
+- **ACREDITADO ESTÁTICAMENTE:** artefacto corresponde al árbol actual; para ese código pasaron `clean build`, nueve regresiones y ocho verificadores en el ciclo anterior. La inspección de IFF y API de subniveles se conserva documentada en 2E.1.
+- **PENDIENTE:** detener manualmente `CMI-Cycle-2E-Test` usando `stop` en su consola normal; colocar después el artefacto nuevo y reiniciar ese servidor. Luego validar `/cmi ships`, `/cmi shipowner`, `/cmi hostileuuid`, `/cmi relation`, y solo con `ENEMY` continuar Fase A, B, C1 y C2. El Ciclo 2E sigue abierto.
+
 ## Ciclo 2E.1: administración explícita de propiedad Sable (sin validación runtime nueva)
 
 - En HEAD `83d97789d26c90dc3cfc0992ab99a630ef531b70` se agregó `/cmi ships`, que enumera solo subniveles Sable cargados con UUID, nombre expuesto por Sable y owner CMI o `unowned`.

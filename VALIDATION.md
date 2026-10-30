@@ -1,5 +1,27 @@
 # Validación realizada
 
+## Ciclo 2E.2 — reanudación detenida antes del runtime
+
+- HEAD verificado en local y `origin/main`: `d46a7cb0d4783a1160a284fbcda372b0a0471154`. Corresponde al mismo árbol de código del hash de referencia `0d736ea701724765a7590fc0deee7dd518c6d0f9`; la diferencia se debe al cambio previo del mensaje de commit a español.
+- El PID actual 6016 se identificó por ejecutable y argumentos como servidor `CMI-Cycle-2E-Test`/NeoForge 21.1.265. El proceso sigue activo; no se confió solo en el PID antiguo. No hay consola normal accesible entre las ventanas visibles y `enable-rcon=false`. No se intentó forzar su cierre.
+- JAR todavía presente en el servidor: `server/mods/create-military-integration-0.1.0-dev.jar`, SHA-256 `5FB3397CAB1760F5367A5F0F8701949D9BCD4F31B3617060FE2E2F0FEE431333`. Artefacto del árbol actual: `build/libs/create-military-integration-0.1.0-dev.jar`, SHA-256 `CF00AA0E5E9B9249B508C0CF1264B2ACC615F440A764D80B2C4A0C0180F84AA3`. No se copió sobre el servidor activo.
+
+### ACREDITADO EN JUEGO
+
+- De la ejecución previa de 2E: NeoForge arrancó, el servidor llegó a `Done`, el cliente entró, CMI apareció cargado y Sable pudo ensamblarse.
+- En esta reanudación no se cargó el artefacto actualizado, no se ejecutaron comandos CMI y no se lanzó Radar Spear. No hay evidencia runtime nueva de propiedad, relación `ENEMY`, guiado, colisión o daño.
+
+### ACREDITADO ESTÁTICAMENTE
+
+- Artefacto SHA-256 actual coincide con el que se construyó tras las nueve regresiones. `clean build`, nueve regresiones Java y los ocho verificadores pasaron para este mismo árbol de código; el único cambio posterior fue el mensaje del commit.
+- IFF offline y comandos de ownership están descritos en la sección de 2E.1.
+
+### PENDIENTE
+
+- Detener normalmente el servidor de prueba con `stop` desde su consola. En este equipo no hay ventana/consola visible ni RCON habilitado para hacerlo desde la sesión actual.
+- Solo después de detenerlo: reemplazar el JAR de `CMI-Cycle-2E-Test` por el artefacto actual, confirmar el hash y reiniciar el servidor aislado.
+- Luego ejecutar `/cmi ships`, `/cmi shipowner <shipUuid> <ownerUuid>`, `/cmi hostileuuid <ownerUuid> true` y `/cmi relation <shipUuid>`. No disparar hasta confirmar `owner`, `platform` y `ENEMY`. Después siguen pendientes Fase A, B, C1 y C2 con los criterios de más abajo.
+
 ## Ciclo 2E.1 — asignación CMI de owner Sable y hostilidad por UUID
 
 ### Inspección y comandos
