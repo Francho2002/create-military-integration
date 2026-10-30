@@ -41,7 +41,7 @@ import net.neoforged.neoforge.common.CommonHooks;
 public final class RadarSpearAreaDamage {
     /** Warium SmallExplosionProcedure calls Level.explode with strength 3.0/TNT. CMI uses this as a conservative spatial envelope, not as a vanilla explosion simulation. */
     public static final double STRUCTURAL_ENVELOPE = 3.0;
-    private static final int MAX_CANDIDATE_CELLS = 4096;
+    static final int MAX_CANDIDATE_CELLS = 4096;
     private static final int MAX_GEOMETRY_CHECKS = 65_536;
     private static final int MIN_BLOCKS_PER_EFFECT = 2;
     private RadarSpearAreaDamage() {}
@@ -85,8 +85,13 @@ public final class RadarSpearAreaDamage {
         if (bounds==null || !bounded(bounds)) return false;
         int x0=floor(bounds.minX),y0=floor(bounds.minY),z0=floor(bounds.minZ);
         int x1=floor(bounds.maxX),y1=floor(bounds.maxY),z1=floor(bounds.maxZ);
-        long cells=(long)(x1-x0+1)*(y1-y0+1)*(z1-y0+1);
-        if (cells<=0 || cells>MAX_CANDIDATE_CELLS) return false;
+        final long cells;
+        try {
+            cells=RadarSpearBlastGeometry.inclusiveCellCount(x0,x1,y0,y1,z0,z1);
+        } catch (IllegalArgumentException | ArithmeticException invalidBounds) {
+            return false;
+        }
+        if (cells>MAX_CANDIDATE_CELLS) return false;
 
         LevelPlot plot=ship.getPlot();
         PlotView view=new PlotView(level,plot);

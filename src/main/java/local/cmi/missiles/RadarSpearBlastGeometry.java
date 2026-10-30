@@ -8,6 +8,23 @@ import net.minecraft.world.phys.Vec3;
 public final class RadarSpearBlastGeometry {
     private RadarSpearBlastGeometry() {}
 
+    /** Inclusive X/Y/Z cell count. Rejects inverted bounds and never silently wraps on overflow. */
+    public static long inclusiveCellCount(int x0, int x1, int y0, int y1, int z0, int z1) {
+        long x = inclusiveDimension(x0, x1, "X");
+        long y = inclusiveDimension(y0, y1, "Y");
+        long z = inclusiveDimension(z0, z1, "Z");
+        try {
+            return Math.multiplyExact(Math.multiplyExact(x, y), z);
+        } catch (ArithmeticException overflow) {
+            throw new ArithmeticException("Inclusive X/Y/Z cell count overflows long");
+        }
+    }
+
+    private static long inclusiveDimension(int min, int max, String axis) {
+        if (max < min) throw new IllegalArgumentException("Inverted " + axis + " bounds");
+        return (long) max - (long) min + 1L;
+    }
+
     /** Conservative plot-space enumeration bound for a sphere defined in world-space. */
     public static AABB worldSphereBoundsInPlot(Vec3 worldCenter, double radius, UnaryOperator<Vec3> worldToPlot) {
         if (!finite(worldCenter) || !Double.isFinite(radius) || radius <= 0 || worldToPlot == null) return null;

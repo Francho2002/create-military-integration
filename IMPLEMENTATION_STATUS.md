@@ -2,6 +2,15 @@
 
 Esta tabla describe el código, no una prueba dentro de Minecraft. Compilación no demuestra aplicación correcta de mixins.
 
+## Ciclo 2D.1: cardinalidad geométrica de Radar Spear
+
+- Se corrigió en `RadarSpearAreaDamage.impactChecked` el factor Z del AABB candidato. La expresión previa era `(long)(x1-x0+1)*(y1-y0+1)*(z1-y0+1)`: mezclaba `y0` con el eje Z. Para límites X=10..12, Y=60..64 y Z=200..207 contaba 2.220 celdas en lugar de 120; otros desplazamientos podían subestimar el volumen y permitir recorrer más celdas que el límite previsto, o producir un conteo no positivo y rechazar la detonación.
+- El conteo ahora pasa por `RadarSpearBlastGeometry.inclusiveCellCount`, que deriva cada dimensión de su propio par de límites, amplía antes de restar, rechaza rangos invertidos y usa `Math.multiplyExact` para no permitir overflow silencioso. Un error de rango o desbordamiento aborta la operación de forma conservadora. El límite existente de 4.096 celdas y el radio no cambian.
+- La auditoría del recorrido confirma que los bucles enumeran X=`x0..x1`, Y=`y0..y1`, Z=`z0..z1`; las cotas del cubo mundial transformado se acumulan en sus ejes respectivos; y la pertenencia física sigue decidiéndose por `intersectsWorldSphere` en unidades mundiales. `worldSphereBoundsInPlot` solo acota enumeración: transforma las ocho esquinas del cubo envolvente mundial. La pose de Sable se usa en las conversiones inversa/directa y el radio de 3 bloques no se escala con la nave.
+- `PlotView` sigue tratando la posición de bloque en el plot como entrada para obtener su `ChunkPos`, valida ese chunk con `LevelPlot.contains`, convierte el chunk global a local con `LevelPlot.toLocal` únicamente al llamar `LevelPlot.getChunk`, y lee estado/forma desde ese chunk y el `EmbeddedPlotLevelAccessor`. No mezcla coordenadas locales del plot con bloques del mundo principal.
+- `radarSpearBlastGeometryRegression` ahora cubre cardinalidad de ejes muy distintos (120), rangos alrededor de cero y negativos, una celda, 4.095/4.096/4.097 celdas, rangos invertidos en X/Y/Z y overflow de producto. También corrige la comprobación de frontera de chunk para convertir posiciones de bloque 15 y 16, y verifica la frontera negativa. Continúan sin cambios los perfiles estrictos, la detonación solo desde colisión real, el Sable designado, el radio de 3 bloques y las exclusiones de Warium, explosiones vanilla, fragmentación, ERA, tareas diferidas y fuerzas artificiales.
+- No se añaden perfiles ni efectos. Radar Spear nativo continúa en Warium. La ejecución y las reacciones físicas dentro de Minecraft siguen sin validarse en este ciclo.
+
 ## Ciclo 2D: ojiva estructural de área Radar Spear
 
 ### Ruta nativa examinada

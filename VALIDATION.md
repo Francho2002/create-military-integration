@@ -1,5 +1,16 @@
 # Validación realizada
 
+## Ciclo 2D.1 — cardinalidad X/Y/Z y límites del área
+
+- Confirmado el HEAD de partida `1dca4fb914cd387a32897fc6db172b71f0cc525c`; se preservaron los archivos locales no seguidos `tools/cycle2d.init.gradle` y `tools/cycle2d/`.
+- Se detectó que la fórmula anterior usaba `z1-y0+1` para la dimensión Z. El conteo de X=10..12, Y=60..64, Z=200..207 daba 2.220 en vez de 120. Se sustituyó por un helper con anchos inclusivos por eje, resta en `long`, rechazo de rangos invertidos y multiplicación comprobada.
+- La suite existente `radarSpearBlastGeometryRegression` incorpora los límites 120, cero, negativos, una celda, debajo/en/encima de 4.096, rangos invertidos por eje y overflow. La misma suite comprueba que posiciones de bloque en la frontera X=15/16 se traduzcan a chunks distintos y mantiene casos de transformación, radio mundial y superset de enumeración. El total permanece en ocho suites Java.
+- Verificación estática de geometría: `worldSphereBoundsInPlot` genera el superset de enumeración a partir de las esquinas del cubo mundial; `intersectsWorldSphere` decide la intersección según distancia en el mundo; la conversión mundo↔plot emplea la pose actual de Sable; y `PlotView` convierte `ChunkPos` con `toLocal` exclusivamente para `getChunk`. El radio mundial de 3 bloques y el modelo de daño no cambian.
+- `clean build` terminó con `BUILD SUCCESSFUL` usando Gradle Wrapper 9.2.1, dependencias offline fijadas y Java 21. Pasaron las ocho suites: `geometryIntersectionRegression`, `guidanceModeRegression`, `managedGuidanceNbtRegression`, `radarSpearBlastGeometryRegression`, `radarSpearImpactRegression`, `radarSpearModeRegression`, `radarSpearStructuralRegression` y `shotContextRegression`.
+- Pasaron los ocho verificadores: `Verify-Artifact.ps1` (62 clases Java 21 y 22 mixins), `Verify-MixinTargets.ps1` (26 clases objetivo), `Verify-RadarSpearBytecode.ps1`, `Verify-RadarSpearArrowCollision.ps1`, `Verify-SableBytecode.ps1`, `Verify-Geometry.ps1`, `Verify-GuidanceBytecode.ps1` y `Verify-RadarSpearArea.ps1`, contra los JAR locales fijados.
+- La nueva regresión produce exactamente 120 para X=10..12, Y=60..64, Z=200..207; cubre rangos negativos y centrados en cero, cardinalidades de 1 y 4.095/4.096/4.097, límites invertidos en cada eje y overflow de `long`. La prueba de chunk usa `BlockPos` en X=15/16 y también cubre coordenadas negativas.
+- Estas comprobaciones prueban el cálculo aislado, las firmas y las rutas estáticas; no aplican mixins ni ejecutan una colisión, detonación, chunk de plot, actualización física, Minecraft, servidor o GameTest.
+
 ## Ciclo 2D — perfil de área estructural Radar Spear
 
 - Confirmado el HEAD base `acb6e2f173598d0646e1be15f5e6d763fa4ea277`. Se preservaron sin tocar los archivos locales no seguidos `tools/cycle2d.init.gradle` y `tools/cycle2d/`; no se ejecutó ninguna tarea `run*`, servidor o GameTest.
