@@ -5,6 +5,7 @@
 ### Estado
 
 - HEAD inicial: `9536b794028204c4d9ea569d3efc1c0743e9fcc4` (`main`). Se usó solo el entorno aislado `CMI-Cycle-2E-Test`; no se modificaron carpetas de producción ni JAR de terceros.
+- El primer arranque de diagnóstico reveló que el `@Shadow calculateTurningSpeed` no podía resolverse en la clase objetivo porque el método se declara en su clase padre. Se reemplazó por un invoker Mixin dirigido a `GuidanceBlockEntity`. Tras `clean build`, las ocho regresiones y los verificadores, el servidor arrancó en el siguiente intento. Esto corrige un error de carga, pero no prueba el guiado en runtime.
 - Se añadieron logs de servidor de baja frecuencia en `RadarSpearDiagnostics`. Sus prefijos `[CMI-RadarSpear]` aparecen solo en la ruta CMI gestionada; los lanzamientos nativos no se instrumentan. Los estados de contacto/primer obstáculo se registran cuando cambian, no cada tick.
 - El servidor local inició y llegó a `Done (14.993s)`; el cliente entró al mundo. CMI figura en el listado de mods y no aparece un error fatal de carga/mixin de CMI en el log de este arranque. No hay una línea de log que demuestre individualmente que cada mixin haya sido aplicado.
 - La nave de prueba (`/fill 32 140 8 36 142 12 minecraft:stone`, cofre en `34 142 10`, `/sable assemble area 32 140 8 36 142 12`) se ensambló correctamente con 75 bloques.
