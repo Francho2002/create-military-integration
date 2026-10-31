@@ -18,6 +18,10 @@ public final class TrajectorySafety {
         return clear(level,actor,path,blastRadius,null);
     }
     public static boolean clear(ServerLevel level, Actor actor, List<Vec3> path, double blastRadius, Entity ignored) {
+        return clear(level, actor, path, blastRadius, ignored, null);
+    }
+    /** The second excluded entity is the already re-authorized CIWS target, never a category of entities. */
+    public static boolean clear(ServerLevel level, Actor actor, List<Vec3> path, double blastRadius, Entity ignored, Entity authorizedTarget) {
         if (actor.owner() == null || !Double.isFinite(blastRadius) || blastRadius < 0 || blastRadius > 64 || path.size() < 2 || path.size() > 6001) return false;
         var container = SubLevelContainer.getContainer(level);
         if (container == null) return false;
@@ -26,7 +30,7 @@ public final class TrajectorySafety {
             Vec3 from = path.get(i - 1), to = path.get(i);
             if (!finite(from) || !finite(to)) return false;
             AABB corridor = new AABB(from, to).inflate(blastRadius + 0.5);
-            if (!entitiesClear(level, actor, corridor,ignored)) return false;
+            if (!entitiesClear(level, actor, corridor,ignored,authorizedTarget)) return false;
             // Check every intersected world chunk, including corners of the corridor.
             int minX = (int)Math.floor(corridor.minX) >> 4, maxX = (int)Math.floor(corridor.maxX) >> 4;
             int minZ = (int)Math.floor(corridor.minZ) >> 4, maxZ = (int)Math.floor(corridor.maxZ) >> 4;
@@ -84,9 +88,9 @@ public final class TrajectorySafety {
         return true;
     }
 
-    private static boolean entitiesClear(ServerLevel level, Actor actor, AABB bounds,Entity ignored) {
+    private static boolean entitiesClear(ServerLevel level, Actor actor, AABB bounds,Entity ignored,Entity authorizedTarget) {
         for (Entity entity : level.getEntities((Entity)null, bounds)) {
-            if (entity==ignored||!entity.isAlive()) continue;
+            if (entity==ignored||entity==authorizedTarget||!entity.isAlive()) continue;
             var contact = CombatServices.resolve(level, new TargetId(TargetId.Kind.ENTITY, entity.getUUID()));
             if (contact.isEmpty() || CombatServices.relation(level, actor, contact.get()) != Relation.ENEMY) return false;
         }

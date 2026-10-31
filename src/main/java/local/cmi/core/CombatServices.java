@@ -16,9 +16,8 @@ import net.minecraft.world.phys.*;
 public final class CombatServices {
     private CombatServices(){}
     private record Snapshot(long tick,List<MilitaryContact> contacts){}
-    private record Reservation(UUID interceptor,long until){}
     private static final Map<ServerLevel,Snapshot> CACHE=new WeakHashMap<>();
-    private static final Map<ServerLevel,Map<TargetId,Reservation>> RESERVED=new WeakHashMap<>();
+    private static final Map<ServerLevel,ReservationBook<TargetId>> RESERVED=new WeakHashMap<>();
     private static void server(ServerLevel l){if(!l.getServer().isSameThread())throw new IllegalStateException("CMI world access off server thread");}
     public static Actor actor(ServerLevel level,BlockPos pos){
         server(level);var claimed=CmiData.get(level).claim(pos);if(claimed!=null)return claimed;
@@ -54,8 +53,8 @@ public final class CombatServices {
     public static boolean isProtected(ServerLevel l,Actor a,Vec3 p){server(l);if(!l.hasChunkAt(BlockPos.containing(p)))return true;
         if(net.neoforged.fml.ModList.get().isLoaded("minecolonies")&&com.minecolonies.api.colony.IColonyManager.getInstance().isCoordinateInAnyColony(l,BlockPos.containing(p)))return true;
         var side=Iff.claim(l,Iff.Allegiance.of(l,a.owner(),"",List.of(),a.iff()==null?"":a.iff()),new net.minecraft.world.level.ChunkPos(BlockPos.containing(p)));return side==Iff.Side.FRIEND;}
-    public static boolean reserve(ServerLevel l,TargetId threat,UUID interceptor,int ttl){server(l);var map=RESERVED.computeIfAbsent(l,k->new HashMap<>());map.values().removeIf(v->v.until()<l.getGameTime());var r=map.get(threat);if(r!=null&&!r.interceptor().equals(interceptor))return false;map.put(threat,new Reservation(interceptor,l.getGameTime()+Math.max(1,ttl)));return true;}
-    public static void release(ServerLevel l,TargetId threat,UUID interceptor){server(l);var m=RESERVED.get(l);if(m!=null){var r=m.get(threat);if(r!=null&&r.interceptor().equals(interceptor))m.remove(threat);}}
+    public static boolean reserve(ServerLevel l,TargetId threat,UUID interceptor,int ttl){server(l);return RESERVED.computeIfAbsent(l,k->new ReservationBook<>()).reserve(threat,interceptor,l.getGameTime(),ttl);}
+    public static void release(ServerLevel l,TargetId threat,UUID interceptor){server(l);var m=RESERVED.get(l);if(m!=null)m.release(threat,interceptor);}
     public static boolean neutralize(ServerLevel l,Actor actor,MilitaryContact contact){server(l);if(!contact.projectile()||!canEngage(l,actor,contact)||contact.id().kind()!=TargetId.Kind.ENTITY)return false;var e=l.getEntity(contact.id().uuid());if(e==null||!projectile(e))return false;e.discard();return true;}
     public static void clear(){CACHE.clear();RESERVED.clear();}
 }

@@ -36,7 +36,7 @@ public final class CreateMilitaryIntegration {
         var actor=ShotContext.current();if(!(event.getLevel() instanceof net.minecraft.server.level.ServerLevel)||actor==null||actor.owner()==null||!CombatServices.projectile(event.getEntity()))return;
         var t=event.getEntity().getPersistentData();if(ShotContext.managed())t.putBoolean("cmiManagedShot",true);t.putUUID("cmiOwner",actor.owner());t.putString("cmiIff",actor.iff()==null?"":actor.iff());if(actor.platform()!=null)t.putUUID("cmiPlatform",actor.platform());
     }
-    private void stopped(ServerStoppedEvent event){CombatServices.clear();}
+    private void stopped(ServerStoppedEvent event){CombatServices.clear();local.cmi.weapons.CiwsCoordinator.clear();}
     private static List<? extends SubLevelAccess> loadedShips(ServerLevel level){
         var container=SubLevelContainer.getContainer(level);
         if(container==null)return List.of();
@@ -82,6 +82,21 @@ public final class CreateMilitaryIntegration {
                 var s=ctx.getSource();var p=BlockPosArgument.getLoadedBlockPos(ctx,"pos");var be=s.getLevel().getBlockEntity(p);
                 if(!(be instanceof riftyboi.cbcmodernwarfare.munitions.munitions_contraption_launcher.guidance.infrared_homing.InfraredSeekerGuidanceBlockEntity)&&!(be instanceof rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity)&&!(be instanceof riftyboi.cbcmodernwarfare.cannon_control.compact_mount.CompactCannonMountBlockEntity))return 0;
                 be.getPersistentData().putBoolean("cmiInterceptor",BoolArgumentType.getBool(ctx,"enabled"));be.getPersistentData().putUUID("cmiOwner",s.getPlayerOrException().getUUID());be.setChanged();s.sendSuccess(()->Component.literal("CMI interceptor mode set on seeker; preserve its NBT when loading"),false);return 1;
+            }))))
+            .then(Commands.literal("ciwsradar").then(Commands.argument("mount",BlockPosArgument.blockPos()).then(Commands.argument("radar",BlockPosArgument.blockPos()).executes(ctx->{
+                var s=ctx.getSource();var mount=BlockPosArgument.getLoadedBlockPos(ctx,"mount");var radar=BlockPosArgument.getLoadedBlockPos(ctx,"radar");
+                String error=local.cmi.weapons.CiwsCoordinator.bindRadar(s.getLevel(),mount,radar,s.getPlayerOrException().getUUID());
+                if(error!=null){s.sendFailure(Component.literal("CIWS radar link rejected: "+error));return 0;}
+                s.sendSuccess(()->Component.literal("CIWS linked to physical radar "+radar+" at mount "+mount),false);return 1;
+            }))))
+            .then(Commands.literal("ciws").then(Commands.argument("mount",BlockPosArgument.blockPos()).then(Commands.argument("enabled",BoolArgumentType.bool()).executes(ctx->{
+                var s=ctx.getSource();var level=s.getLevel();var pos=BlockPosArgument.getLoadedBlockPos(ctx,"mount");var be=level.getBlockEntity(pos);var player=s.getPlayerOrException();boolean enabled=BoolArgumentType.getBool(ctx,"enabled");
+                if(!(be instanceof riftyboi.cbcmodernwarfare.cannon_control.compact_mount.CompactCannonMountBlockEntity mount)){s.sendFailure(Component.literal("Position is not a compact cannon mount."));return 0;}
+                var actor=CombatServices.actor(level,pos);
+                if(actor.owner()==null||!actor.owner().equals(player.getUUID())||!be.getPersistentData().hasUUID("cmiOwner")||!be.getPersistentData().getUUID("cmiOwner").equals(player.getUUID())){s.sendFailure(Component.literal("Claim this mount with /cmi claim first."));return 0;}
+                if(enabled){String error=local.cmi.weapons.CiwsCoordinator.enableError(level,pos,player.getUUID());if(error!=null){s.sendFailure(Component.literal("CIWS activation rejected: "+error));return 0;}}
+                local.cmi.weapons.CiwsCoordinator.setEnabled(level,mount,enabled);
+                s.sendSuccess(()->Component.literal("CIWS "+(enabled?"enabled":"disabled")+" at "+pos),false);return 1;
             }))))
             .then(Commands.literal("radarspearprofile").then(Commands.argument("pos",BlockPosArgument.blockPos()).then(Commands.argument("profile",StringArgumentType.word()).executes(ctx->{
                 var s=ctx.getSource();var p=BlockPosArgument.getLoadedBlockPos(ctx,"pos");var be=s.getLevel().getBlockEntity(p);

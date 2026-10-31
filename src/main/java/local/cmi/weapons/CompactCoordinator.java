@@ -21,6 +21,11 @@ import riftyboi.cbcmodernwarfare.munitions.medium_cannon.apfsds.APFSDSMediumcann
 public final class CompactCoordinator {
     private CompactCoordinator() {}
     public static void tick(ServerLevel level, CompactCannonMountBlockEntity mount) {
+        // Explicit false stops CMI automation; an absent flag preserves the previous general path.
+        if (CiwsCoordinator.hasConfiguredMode(mount)) {
+            if (CiwsCoordinator.controls(mount)) CiwsCoordinator.tick(level, mount);
+            return;
+        }
         var entity = WeaponAdapters.compactContraption(mount);
         if (entity == null || entity.isStalled() || !entity.canBeTurnedByController(mount)) return;
         if (LauncherSupport.isLauncher(entity)) { LauncherCoordinator.tick(level, entity, mount); return; }

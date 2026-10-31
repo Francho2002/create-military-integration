@@ -5,6 +5,7 @@
   "compatibilityLevel": "JAVA_21",
   "mixins": [
     "weapons.MediumMaterialAccess",
+    "weapons.AutocannonMaterialAccess",
     "weapons.RotaryMaterialAccess",
     "weapons.ProjectileBallisticsAccess",
     "weapons.WariumCannonAccess",
@@ -25,6 +26,7 @@
     "safety.BallisticSafetyMixin",
     "safety.CannonInterceptionMixin",
     "safety.CompactTickMixin",
+    "safety.CiwsFireGuardMixin",
     "safety.ComputerTargetAccess",
     "safety.TargetAuthorizationMixin",
     "safety.NativeFireGuardMixin",

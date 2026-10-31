@@ -1,5 +1,22 @@
 # Validación realizada
 
+## Ciclo 2G — CIWS automático (solo estático)
+
+### ACREDITADO ESTÁTICAMENTE
+
+- HEAD de partida `d9cf93caa23c0d295de0ceac3a05644b26bbccff`; se preservaron los no seguidos `tools/cycle2d.init.gradle` y `tools/cycle2d/`. No se iniciaron Minecraft, cliente, servidor ni GameTest.
+- `clean build --offline` con Java 21 y hashes fijados terminó `BUILD SUCCESSFUL`. Pasaron **11 suites Java**, incluida `ciwsPolicyRegression`: IDs PROJECTILE válidos/malformados/caducados y presupuestos, owner/IFF, aproximación/NaN, AABB y solución, selección/lock/dos barridos, permiso de un uso y dos propietarios compitiendo por `ReservationBook` con liberación y caducidad. Sus guardas de fuente verifican radar físico, corredor y ausencia de adquisición global o neutralización por predicción.
+- Pasaron los nueve verificadores anteriores y `Verify-CIWS.ps1`: **10 verificadores**. `Verify-Artifact` inspeccionó 85 clases Java 21 y 27 mixins; `Verify-MixinTargets` examinó 33 clases objetivo. `Verify-CIWS` valida hashes de Radar, Better Targeting, Neo Warfare, CBC, FTB Chunks/Teams y MineColonies; inspecciona constructor y clave `UUID.toString()` de track, callback de creación/refresco, categoría, barrido cada cinco ticks, expiración inicial de 100 ticks y eliminación de tracks muertos/vencidos, filtros por rango horizontal/FOV/altura, descriptores de radar/montura/solver/fireShot, cargas de munición, tiempo de vida, cooldown, mixin y guardas de origen.
+- `FtbCompat.Inner.claimFriendly` retorna `Optional.empty()` para chunk sin claim y `Optional.of(true/false)` para claim con o sin amistad; CIWS usa la presencia para proteger ambos. `ColonyManager.isCoordinateInAnyColony` consulta ownership del chunk. El código CIWS falla cerrado ante manager FTB indisponible. En el radar, la ausencia de entidad elimina su track en la limpieza; una pérdida de cobertura puede dejarlo hasta la expiración, pero el filtro CMI de antigüedad 0–1 tick lo excluye antes.
+- El JAR compilado SHA-256 es `16C598E4B54273ACDBB07AF5D32F5A6541065C3C5250072F36C41688E9D5F85C`. La compilación/bytecode no aplican mixins ni ejecutan el mundo.
+
+### PENDIENTE DE VALIDACIÓN EN JUEGO
+
+- Tracks reales PROJECTILE con ownership válido, aplicación/prioridad de mixins, lock, giro, disparo, interacción con FTB/MineColonies y colisión cinética contra un proyectil real. No se simuló neutralización por una solución matemática.
+- CIWS está acotado a radar y montura del mundo principal. El cannon medium no dispone de lifetime finito acreditado en vuelo y queda bloqueado. Solo rotary Neo Warfare y autocannon CBC exactos, con AP inerte, sin incendiario/espoleta y dispersión cero, pasan los adaptadores; el runtime todavía no demuestra que un disparo impacte o neutralice.
+- Se examina el corredor de **toda** la vida finita del proyectil, con máximo 200 ticks. Todo claim FTB bloquea CIWS, incluso propio y enemigo; los claims o colonias en torno a la montura pueden impedir el disparo. `cmiCIWS=false` deshabilita el coordinador CMI; el control nativo del arma no se desactiva.
+- El Ciclo 2E continúa pendiente de validación en juego. Ningún resultado de 2G cambia ese estado.
+
 ## Ciclo 2F — Radar automático Radar Spear (solo estático)
 
 ### ACREDITADO ESTÁTICAMENTE
