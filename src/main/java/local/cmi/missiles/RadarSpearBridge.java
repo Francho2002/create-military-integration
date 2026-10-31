@@ -42,8 +42,23 @@ public final class RadarSpearBridge {
             RadarSpearDiagnostics.requested(missile, "launch_rejected", "reason=target_point_invalid_or_unloaded point=" + RadarSpearDiagnostics.vec(point));
             return false;
         }
-        var target = CombatServices.contacts(level).stream().filter(c -> c.bounds().contains(point))
-                .min(Comparator.comparingDouble(c -> c.position().distanceToSqr(point)));
+        Optional<MilitaryContact> target;
+        if (source.contains("cmiRadarAuto", net.minecraft.nbt.Tag.TAG_BYTE) && source.getBoolean("cmiRadarAuto")) {
+            if (!source.hasUUID("cmiRadarAutoTarget")) {
+                RadarSpearDiagnostics.requested(missile, "launch_rejected", "reason=automatic_target_missing launcher=" + pos);
+                return false;
+            }
+            TargetId designated = new TargetId(TargetId.Kind.SABLE, source.getUUID("cmiRadarAutoTarget"));
+            if (!RadarSpearAutomation.authorizesLaunch(level, pos, designated.uuid(), point)) {
+                RadarSpearDiagnostics.requested(missile, "launch_rejected", "reason=automatic_radar_track_or_iff_invalid launcher=" + pos);
+                return false;
+            }
+            target = CombatServices.resolve(level, designated).filter(c -> c.bounds().contains(point)
+                    && CombatServices.canEngage(level, actor, c));
+        } else {
+            target = CombatServices.contacts(level).stream().filter(c -> c.bounds().contains(point))
+                    .min(Comparator.comparingDouble(c -> c.position().distanceToSqr(point)));
+        }
         if (target.isEmpty() || !CombatServices.canEngage(level, actor, target.get())) {
             RadarSpearDiagnostics.requested(missile, "launch_rejected", "reason=" + (target.isEmpty() ? "no_contact_at_designated_point" : "target_not_engageable") + " point=" + RadarSpearDiagnostics.vec(point));
             return false;

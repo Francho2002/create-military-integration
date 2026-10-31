@@ -2,6 +2,35 @@
 
 Esta tabla describe el código, no una prueba dentro de Minecraft. Compilación no demuestra aplicación correcta de mixins.
 
+## Ciclo 2F — Radar automático Radar Spear (validación estática)
+
+- Base real al comenzar: `main` en `e5080d7133671696ba0d91031f6c015b32a8269d`, que ya contiene los cambios posteriores al commit antiguo `0d736ea...`. Se conservaron sin tocar `tools/cycle2d.init.gradle` y `tools/cycle2d/`.
+- API de detección fijada: `create-radars-0.4.9.4.jar`, SHA-256 contrastado con `dependency-hashes.properties`. `IRadar.getTracks()` es implementado por `StationaryRadarBlockEntity` y `RadarBearingBlockEntity`. Sus `RadarTrack` tienen ID, posición, velocidad, instante de scan y `TrackCategory`; Sable se etiqueta `SABLE` y su ID es el UUID del subnivel. `RadarScanningBlockBehavior` actualiza cada 5 ticks, y aplica rango horizontal, rango vertical y FOV. No encontré un raycast de línea de visión en este escáner. El `getTracks()` del radar bearing puede aplicar su API de spoofing; la fábrica fijada examinada devuelve la colección vacía, por lo que no ofrece un track Sable autorizable.
+- Better Targeting `Sensor.scan` no es un sensor radar que pueda usarse para este objetivo: barre entidades vivas y Sable mediante búsquedas de nivel/radio; no entrega los tracks de `IRadar`, ni el FOV/rango del radar físico. CMI no lo utiliza para adquisición y tampoco usa `CombatServices.contacts()` en `RadarSpearAutomation`.
+- No encontré una asociación existente Create: Radars ↔ Warium Ordinance Controller. Se incorporó un vínculo explícito y acotado: `/cmi radarspearradar <hardpoint> <radar>`. Acepta solo los dos block entities reales, cargados y en la misma dimensión; radar y hardpoint deben tener owner CMI conocido e idéntico. Esta ruta de comandos usa block entities del `ServerLevel`; hardpoints/radares dentro de plots Sable no están soportados por este ciclo.
+- `/cmi radarspearauto <pos> true|false` activa el modo solo sobre un hardpoint con owner del ejecutor, `cmiManaged`, perfil Sable válido y radar enlazado. No hay activación por defecto. Desactivar borra el lock CMI y restaura `TargetX/Y/Z` anteriores solo si aún coinciden exactamente con los valores que escribió CMI; conserva cambios externos posteriores. Modo ausente/falso deja intactos el trigger, redstone y la designación manual de Warium; un marcador presente pero malformado bloquea el disparo de esa montura.
+- `RadarSpearAutoTriggerMixin` toma el control solo cuando el byte NBT `cmiRadarAuto` es explícitamente true. Ejecuta la adquisición CMI y cancela el copiado/trigger del Ordinance Controller para ese hardpoint. `RadarSpearAutoFireGuardMixin` bloquea entradas Warium de redstone/nativas en ese hardpoint salvo un permiso de un solo uso CMI vinculado a ese `LevelAccessor` y `BlockPos`. Otros hardpoints Warium no pasan por esta guarda.
+- La adquisición lee exclusivamente `IRadar.getTracks()` del radar enlazado, admite solo `TrackCategory.SABLE`, UUID parseable, scan de no más de un tick, Sable resuelto de nuevo, owner conocido, platform UUID coincidente, plataforma distinta a la propia, relación actual `ENEMY` y `CombatServices.canEngage` (que vuelve a comprobar IFF y territorio). Ordena por UUID y procesa como máximo 128 tracks Sable por barrido; si se excede el presupuesto, falla cerrado en vez de elegir un subconjunto según el orden de colección. Tracks ausentes, caducados, neutrales, aliados, desconocidos, sin owner o protegidos no adquieren ni disparan.
+- El lock conserva el blanco vigente si sigue elegible; si se pierde, escoge el contacto actual más cercano al hardpoint y desempata con UUID lexicográfico. Se exigen dos timestamps de scan distintos; un mismo track cacheado no suma. CMI procesa en `gameTime % 5 == 2`, justo después de la cadencia del scanner fijado (`% 5 == 1`), y exige antigüedad 0–1 tick. La designación es el centro actual y finito de `MilitaryContact.bounds()`.
+- En `MissileHardpointFireProcedure` el bytecode fijado construye el proyectil Radar Spear, invoca la fábrica y `BlockWeaponRecoil.spawn`, añade LX/LY/LZ, y reemplaza el hardpoint cargado por el vacío conservando NBT. El procedimiento de trigger de Warium copia TargetX/Y/Z desde Ordinance Controller y llama al procedimiento de disparo según Trigger. Para auto, CMI escribe esos mismos keys Warium y llama a `MissileHardpointFireProcedure.execute`; no crea la entidad ni invoca `BlockWeaponRecoil.spawn`. La captura ya existente `RadarSpearLaunchMixin` sigue siendo el único punto CMI de captura. El Bridge de lanzamiento ahora exige para auto el mismo UUID Sable seleccionado y revalida el track físico/IFF antes del spawn. La salida de Warium consume/reemplaza el hardpoint, y CMI deduplica por timestamp de scan; el bytecode no muestra un cooldown independiente dentro del procedimiento de disparo.
+- `RadarSpearLockRegression` verifica ausencia de candidato cuando la lista del sensor está vacía, freshness/caducidad, lock persistente, pérdida, nueva adquisición, necesidad de dos sweeps, una sola solicitud por timestamp y desempate determinista. `Verify-RadarAutomation.ps1` contrasta hashes, API radar, categorías y timestamps, métodos de trigger/fire Warium, mixins y la ausencia de scans globales/spawn directo.
+- **ACREDITADO ESTÁTICAMENTE:** interfaz/clases radar y tracks, rutas TargetX/Y/Z y fire de Warium examinadas; nueva ruta CMI compila y las guardas de fuente/bytecode pasan. No se inició Minecraft, servidor ni GameTest.
+- **PENDIENTE DE VALIDACIÓN EN JUEGO:** tejido efectivo de mixins, vinculación real de blocks, tracks Sable dentro de un mundo activo, lock temporal, inserción/captura del misil y disparo real. El escáner Radar no implementa línea de visión; el ciclo solo acredita el FOV y rangos del mod. El modo automático es para hardpoints y radares accesibles como block entities del mundo/dimensión, no para bloques guardados dentro de plots Sable.
+
+| Capacidad | Estado |
+|---|---|
+| API radar real inspeccionada | IMPLEMENTADO |
+| Contacto físico radar | IMPLEMENTADO; el runtime queda pendiente |
+| Correlación radar → Sable | IMPLEMENTADO |
+| Filtro IFF | IMPLEMENTADO; reutiliza `relation` + `canEngage` |
+| Lock estable | IMPLEMENTADO en política estática de dos barridos |
+| Designación TargetX/Y/Z | IMPLEMENTADO con keys Warium y punto de bounds actual |
+| Trigger Warium nativo | IMPLEMENTADO; se invoca su procedimiento de disparo desde el hook de trigger |
+| Captura RadarSpearBridge | IMPLEMENTADO; revalida UUID, track, perfil e IFF |
+| direct_sable automático | PENDIENTE DE VALIDACIÓN EN JUEGO |
+| explosive_sable automático | PENDIENTE DE VALIDACIÓN EN JUEGO |
+| Compatibilidad manual | IMPLEMENTADO por guardas condicionadas a auto=true |
+
 ## Ciclo 2E.2: validación runtime pausada por reinicio seguro
 
 - HEAD remoto actual: `d46a7cb0d4783a1160a284fbcda372b0a0471154`. Tiene el mismo árbol de código del ciclo 2E.1 solicitado como `0d736ea701724765a7590fc0deee7dd518c6d0f9`; solo se reescribió el mensaje del commit a español.

@@ -1,5 +1,27 @@
 # Validación realizada
 
+## Ciclo 2F — Radar automático Radar Spear (solo estático)
+
+### ACREDITADO ESTÁTICAMENTE
+
+- Inicio verificado sobre `main` en `e5080d7133671696ba0d91031f6c015b32a8269d`; `origin/main` coincidía al comenzar. El árbol incluía trabajo posterior a la referencia 2E.1 antigua y no fue rebajado. Se preservaron los archivos locales no seguidos `tools/cycle2d.init.gradle` y `tools/cycle2d/`.
+- La API real inspeccionada es `IRadar.getTracks()` de `StationaryRadarBlockEntity` y `RadarBearingBlockEntity`, con `RadarTrack.trackCategory/id/scannedTime/position/velocity`. `RadarScanningBlockBehavior` realiza los scans de Sable cada cinco ticks y usa rango/FOV/rango vertical. El código examinado no comprueba línea de visión. El sensor de Better Targeting no sustituye este contrato físico; CMI no lo consulta para adquirir.
+- Warium copia en `HardpointTriggerTickProcedure` los keys `TargetX/Y/Z` seleccionados del Ordinance Controller al hardpoint y luego evalúa `Trigger`. Su ruta de disparo es `MissileHardpointFireProcedure.execute`; el bytecode fijado conserva la creación del Radar Spear, su `BlockWeaponRecoil.spawn` nativo y la sustitución del hardpoint cargado por su versión vacía.
+- Implementación CMI: los comandos nuevos son `/cmi radarspearradar <hardpoint> <radar>` y `/cmi radarspearauto <pos> true|false`. El vínculo acepta solo un radar físico cargado de Create: Radars, mismo dimension y owner CMI conocido/igual. Auto requiere owner del hardpoint, perfil gestionado `direct_sable` o `explosive_sable` y radar enlazado.
+- Las inyecciones nuevas condicionan su intervención al byte `cmiRadarAuto=true`. El hook de trigger cancela el copiado/control Ordinance únicamente en ese modo; el hook de `MissileHardpointFireProcedure` bloquea redstone/llamadas externas al modo auto. CMI invoca el procedimiento de disparo nativo bajo un permiso de un solo uso por `(LevelAccessor, BlockPos)`. No crea el misil ni llama a `BlockWeaponRecoil.spawn` directamente. El redirect existente `RadarSpearLaunchMixin` sigue capturando la entidad y `RadarSpearBridge` revalida en el lanzamiento el track físico, UUID Sable, estado actual de IFF, perfil y designación.
+- Candidate filter: solo track categoría `SABLE`, UUID válido, muestra de radar de 0–1 ticks, contacto re-resuelto, owner y platform conocidos, platform distinta de la propia, relación `ENEMY`, y `canEngage`. Lock mantiene un blanco aún elegible, si no elige el más cercano al hardpoint con empate por UUID; exige dos timestamps distintos. Se designa el centro actual de los bounds. El auto procesador corre en la fase `gameTime % 5 == 2`, un tick después de la cadencia del scanner `% 5 == 1`.
+- `RadarSpearLockRegression` cubre candidato ausente, freshness/caducidad, target retenido, liberación por pérdida, selección próxima y desempate, dos muestras diferentes, idempotencia del disparo por sweep y reacquisición desde cero. `Verify-RadarAutomation.ps1` contrasta hashes fijados, firmas radar/Warium, puntos de inyección, uso de tracks físicos, guards IFF/plataforma y ausencia de `CombatServices.contacts`, `Sensor.scan`, spawn directo o `BlockWeaponRecoil.spawn` en el automatizador.
+- `clean build` terminó en `BUILD SUCCESSFUL` con Java 21, NeoForge/dependencias fijadas y `verifyDependencies`. Pasaron las diez suites Java: las nueve anteriores y `radarSpearLockRegression`.
+- Pasaron los ocho verificadores anteriores (`Verify-Artifact`, `Verify-MixinTargets`, `Verify-GuidanceBytecode`, `Verify-RadarSpearBytecode`, `Verify-RadarSpearArrowCollision`, `Verify-SableBytecode`, `Verify-Geometry`, `Verify-RadarSpearArea`) y el nuevo `Verify-RadarAutomation`. Resultados: 74 clases Java 21/25 mixins registrados; 29 clases objetivo examinadas; firmas y call sites comprobados contra los JAR fijados.
+- SHA-256 del artefacto compilado `build/libs/create-military-integration-0.1.0-dev.jar`: `873FD5CD96CEF9F3CF28C9217A7FA4887A5AF3A2A5F849C62A51CBB3599DB0BA`.
+- No se inició Minecraft, cliente, servidor ni GameTest. Estos verificadores no aplican mixins y no acreditan runtime.
+
+### PENDIENTE
+
+- Aplicación efectiva/prioridad de los mixins y cualquier resultado observable de tracks, lock o disparo. No se afirma que un Radar Spear haya sido disparado por esta implementación.
+- La asociación de configuración usa block entities accesibles desde el `ServerLevel`; bloques localizados dentro de un plot Sable no están admitidos por estos comandos en este ciclo. El mecanismo falla cerrado si no puede obtener un `ServerLevel`/radar enlazado válido.
+- El escáner no ofrece prueba de línea de visión, por lo que el comportamiento implementado refleja la detección por rango, FOV, rango vertical y filtros configurados por Create: Radars, no oclusión física.
+
 ## Ciclo 2E.2 — reanudación detenida antes del runtime
 
 - HEAD verificado en local y `origin/main`: `d46a7cb0d4783a1160a284fbcda372b0a0471154`. Corresponde al mismo árbol de código del hash de referencia `0d736ea701724765a7590fc0deee7dd518c6d0f9`; la diferencia se debe al cambio previo del mensaje de commit a español.

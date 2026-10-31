@@ -93,6 +93,22 @@ public final class CreateMilitaryIntegration {
                 var data=be.getPersistentData();data.putBoolean("cmiManaged",true);data.putUUID("cmiOwner",player.getUUID());data.putString("cmiRadarProfile",profile);be.setChanged();
                 s.sendSuccess(()->Component.literal("Radar Spear profile set to "+profile+". explosive_sable is a CMI-only, block-structural area effect; Warium's fragments and native explosions stay disabled for this managed launch."),false);return 1;
             }))))
+            .then(Commands.literal("radarspearradar").then(Commands.argument("hardpoint",BlockPosArgument.blockPos()).then(Commands.argument("radar",BlockPosArgument.blockPos()).executes(ctx->{
+                var s=ctx.getSource();var hardpoint=BlockPosArgument.getLoadedBlockPos(ctx,"hardpoint");var radar=BlockPosArgument.getLoadedBlockPos(ctx,"radar");
+                var player=s.getPlayerOrException();String error=local.cmi.missiles.RadarSpearAutomation.bindRadar(s.getLevel(),hardpoint,radar,player.getUUID());
+                if(error!=null){s.sendFailure(Component.literal("Radar Spear radar link rejected: "+error));return 0;}
+                s.sendSuccess(()->Component.literal("Linked physical Create: Radars block at "+radar+" to Radar Spear hardpoint at "+hardpoint+" in "+s.getLevel().dimension().location()),false);return 1;
+            }))))
+            .then(Commands.literal("radarspearauto").then(Commands.argument("pos",BlockPosArgument.blockPos()).then(Commands.argument("enabled",BoolArgumentType.bool()).executes(ctx->{
+                var s=ctx.getSource();var pos=BlockPosArgument.getLoadedBlockPos(ctx,"pos");var be=s.getLevel().getBlockEntity(pos);var player=s.getPlayerOrException();boolean enabled=BoolArgumentType.getBool(ctx,"enabled");
+                if(be==null){s.sendFailure(Component.literal("No loaded block entity at "+pos));return 0;}
+                var owner=CombatServices.actor(s.getLevel(),pos);
+                if(owner.owner()==null||!owner.owner().equals(player.getUUID())){s.sendFailure(Component.literal("The hardpoint must have this player's CMI ownership."));return 0;}
+                if(enabled){String error=local.cmi.missiles.RadarSpearAutomation.enableError(s.getLevel(),pos,player.getUUID());if(error!=null){s.sendFailure(Component.literal("Radar Spear auto rejected: "+error));return 0;}}
+                else if(!(be instanceof com.wariumce.block.entity.RadarSpearMissileHardpointBlockEntity)&&!(be instanceof com.wariumce.block.entity.EmptyMissileHardpointBlockEntity)){s.sendFailure(Component.literal("Position is not a Radar Spear hardpoint or its empty replacement."));return 0;}
+                local.cmi.missiles.RadarSpearAutomation.setEnabled(be,enabled);
+                s.sendSuccess(()->Component.literal("Radar Spear automatic mode "+(enabled?"enabled":"disabled")+" at "+pos+". Radar track must pass current CMI IFF before Warium is asked to fire."),false);return 1;
+            }))))
             .then(Commands.literal("managed").then(Commands.argument("pos",BlockPosArgument.blockPos()).then(Commands.argument("enabled",BoolArgumentType.bool()).executes(ctx->{
                 var s=ctx.getSource();var p=BlockPosArgument.getLoadedBlockPos(ctx,"pos");var be=s.getLevel().getBlockEntity(p);if(be==null)return 0;
                 be.getPersistentData().putBoolean("cmiManaged",BoolArgumentType.getBool(ctx,"enabled"));be.getPersistentData().putUUID("cmiOwner",s.getPlayerOrException().getUUID());be.setChanged();s.sendSuccess(()->Component.literal("CMI managed launcher flag updated; native Radar Spear coordinate contract remains required"),false);return 1;
