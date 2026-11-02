@@ -252,8 +252,8 @@ Estado: implementado a nivel estático; la detección e intercepción real queda
 | Capacidad | Estado |
 |---|---|
 | Entity type Neo Warfare | IMPLEMENTADO: `cbcmodernwarfare:munitions_contraption`, registrado por `CBCModernWarfareEntityTypes.MUNITIONS_CONTRAPTION` como `MunitionsPhysicsContraptionEntity`. |
-| Tag radar PROJECTILE | IMPLEMENTADO: el recurso añade únicamente ese tipo a `create_radar:radar_projectile`, con `replace:false`. |
-| Inclusión en barrido físico | CONDICIONADO: Radars consulta `AbstractContraptionEntity` cuando `scanContraptions` está activo. CMI exige además que el filtro `scanProjectiles` esté activo antes de aceptar tracks para CIWS. Rango, FOV y cadencia nativos no se alteran. |
+| Tag radar PROJECTILE | IMPLEMENTADO: `data/create_radar/tags/entity_type/radar_projectile.json` añade únicamente ese tipo a `create_radar:radar_projectile`, con `replace:false`. |
+| Inclusión en barrido físico | CONDICIONADO: Radars consulta `AbstractContraptionEntity` cuando `scanContraptions` está activo. CMI exige `scanProjectiles` para todo candidato y, tras resolver la entidad, exige también `scanContraptions` solo si es una contraption. Un proyectil normal sigue siendo elegible con `scanContraptions=false`. |
 | UUID del track | IMPLEMENTADO: `RadarTrack(Entity)` guarda el UUID real de la entidad en formato canónico (`UUID.toString()`); CMI vuelve a resolver esa misma entidad en el `ServerLevel`. |
 | Velocidad | CONDICIONADO: el misil publica su movimiento físico actual mediante `setContraptionMotion`/`getDeltaMovement`; el solver usa esa velocidad como snapshot lineal. Thrust y guiado pueden cambiarla durante el vuelo, así que no se garantiza una intercepción de un blanco maniobrante. |
 | AABB | CONDICIONADO: Warium deriva los límites de los bloques de la contraption, añade su margen nativo y Create usa esos límites para la caja de la entidad. CMI reutiliza la caja real del entity contact; no inventa dimensiones. |
@@ -264,4 +264,12 @@ Estado: implementado a nivel estático; la detección e intercepción real queda
 
 Validación estática del ciclo: `clean build --offline` y las 12 regresiones JavaExec pasaron. Pasaron los 11 verificadores anteriores más `Verify-MultiblockMissileRadar.ps1` (12 en total). `git diff --check` pasó. El artefacto compilado tuvo SHA-256 `8AD901B6C5986E13C1BE455795C45DC9346CDD22FB2E9987D40D8AF52A443134`.
 
-Detalle de filtros de Radars 0.4.9.4: el misil no hereda `Projectile`, por lo que su **consulta física** entra por `scanContraptions`. El tag cambia la clasificación posterior a PROJECTILE antes del fallback CONTRAPTION. El barrido nativo no filtra de nuevo cada entidad con `allowCategory` después de la consulta; para no dejar que esa diferencia de categorías autorice un tiro, CMI lee ambos flags y falla cerrado si `scanContraptions` o `scanProjectiles` están apagados. El radar conserva intactos sus filtros y parámetros.
+Detalle de filtros de Radars 0.4.9.4: el misil no hereda `Projectile`, por lo que su **consulta física** entra por `scanContraptions`. El tag cambia la clasificación posterior a PROJECTILE antes del fallback CONTRAPTION. CMI siempre requiere `scanProjectiles`; después de resolver el UUID al entity real requiere `scanContraptions` solo para `AbstractContraptionEntity`. Así se conserva el filtro físico sin bloquear los proyectiles CBC normales. El radar conserva intactos sus filtros y parámetros.
+
+## Ciclo 2I.1 — corrección del tag 1.21.1 y filtro CIWS
+
+Se corrigió la ubicación del recurso al directorio singular `data/create_radar/tags/entity_type/radar_projectile.json`, requerido por Minecraft 1.21.1. El contenido permanece exactamente `replace:false` y el único valor `cbcmodernwarfare:munitions_contraption`; la ruta plural obsoleta se elimina y se rechaza tanto en fuentes como en el JAR.
+
+El filtro CIWS diferencia el tipo real después de resolver el UUID del track: `scanProjectiles` es obligatorio siempre; `scanContraptions` es adicional solo para entidades `AbstractContraptionEntity`. La misma política se aplica al adquirir candidatos y revalidar un lock/reserva. IFF, frescura, ownership, solución, corredor y disparo nativo no cambian. Validación runtime pendiente.
+
+**Validación estática 2I.1:** `clean build --offline` pasó con las 12 regresiones Java. Pasaron los 12 verificadores y `git diff --check`. El JAR contiene la etiqueta en la ruta singular y no contiene la ruta plural. SHA-256: `7C54267AFDF6402B57FA2CC87A975DD2C5A559559CFD154AE611BC57B1460C5F`. La comprobación de juego sigue pendiente; no se modificaron instalaciones activas.

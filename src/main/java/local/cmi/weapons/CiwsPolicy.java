@@ -25,6 +25,15 @@ public final class CiwsPolicy {
                 (platform == null || !platform.equals(targetPlatform)) && relation == Relation.ENEMY && canEngage;
     }
 
+    /**
+     * Applies the radar's physical-query and category switches to the resolved entity.
+     * Ordinary Projectile entities are queried by scanProjectiles; contraptions require
+     * the separate physical scanContraptions query as well as projectile classification.
+     */
+    public static boolean sensorAllows(boolean scanProjectiles, boolean scanContraptions, boolean contraptionEntity) {
+        return scanProjectiles && (!contraptionEntity || scanContraptions);
+    }
+
     public static UUID projectileId(boolean projectileTrack, String id, long now, long scannedAt) {
         if (!projectileTrack || id == null || (scannedAt != now && (now == Long.MIN_VALUE || scannedAt != now - 1))) return null;
         try {

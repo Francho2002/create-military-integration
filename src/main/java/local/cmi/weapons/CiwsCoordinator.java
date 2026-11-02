@@ -30,6 +30,7 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
+import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import net.minecraft.world.level.ClipContext;
@@ -58,6 +59,7 @@ public final class CiwsCoordinator {
         FirePermit(ServerLevel level, PitchOrientedContraptionEntity cannon) { this.level = level; this.cannon = cannon; }
     }
     private record Binding(IRadar radar, String error) {}
+    private record RadarSnapshot(List<RadarTrack> tracks, boolean scanProjectiles, boolean scanContraptions) {}
     private record Plan(MilitaryContact contact, Entity target, long scannedAt, double closestTime,
                         double distanceSquared, double tolerance, FiringSolver solver, FiringSolver.Solution solution) {
         CiwsPolicy.Candidate candidate() { return new CiwsPolicy.Candidate(contact.id().uuid(), scannedAt, closestTime, distanceSquared); }
@@ -239,15 +241,15 @@ public final class CiwsCoordinator {
     private static List<Plan> plans(ServerLevel level, CompactCannonMountBlockEntity mount,
             PitchOrientedContraptionEntity cannon, Actor actor, IRadar radar,
             com.mrvew.firecontrol.ballistics.ShellModel shell, CannonProbe.Aim aim, Vec3 pivot, long now) {
-        List<RadarTrack> tracks = projectileTracks(radar);
-        if (tracks == null) return null;
+        RadarSnapshot radarSnapshot = projectileTracks(radar);
+        if (radarSnapshot == null) return null;
         List<Plan> result = new ArrayList<>();
         int eligible = 0;
-        for (RadarTrack track : tracks) {
+        for (RadarTrack track : radarSnapshot.tracks()) {
             UUID id = CiwsPolicy.projectileId(track.trackCategory() == TrackCategory.PROJECTILE, track.id(), now, track.scannedTime());
             if (id == null || !finite(track.position()) || !finite(track.velocity())) continue;
             Entity target = level.getEntity(id);
-            if (target == null || !target.isAlive() || !CombatServices.projectile(target)) continue;
+            if (target == null || !target.isAlive() || !CombatServices.projectile(target) || !sensorAllows(radarSnapshot, target)) continue;
             var contact = CombatServices.resolve(level, new TargetId(TargetId.Kind.ENTITY, id)).orElse(null);
             if (contact == null || !CiwsPolicy.eligible(target.isAlive(), contact.projectile(), actor.owner(), contact.owner(),
                     actor.platform(), contact.platform(), CombatServices.relation(level, actor, contact), CombatServices.canEngage(level, actor, contact))) continue;
@@ -273,15 +275,19 @@ public final class CiwsCoordinator {
         return result;
     }
 
-    private static List<RadarTrack> projectileTracks(IRadar radar) {
+    private static RadarSnapshot projectileTracks(IRadar radar) {
         List<RadarTrack> tracks = new ArrayList<>();
+        boolean scanProjectiles = false;
+        boolean scanContraptions = false;
         try {
             if (!running(radar)) return null;
             if (!(radar instanceof SmartBlockEntity smart)) return null;
             RadarScanningBlockBehavior scanning = smart.getBehaviour(RadarScanningBlockBehavior.TYPE);
             if (scanning == null) return null;
             RadarScanningFilterAccess filters = (RadarScanningFilterAccess)(Object)scanning;
-            if (!filters.cmi$scanContraptions() || !filters.cmi$scanProjectiles()) return null;
+            scanProjectiles = filters.cmi$scanProjectiles();
+            scanContraptions = filters.cmi$scanContraptions();
+            if (!scanProjectiles) return null;
             var snapshot = radar.getTracks();
             if (snapshot == null) return null;
             int scanned = 0;
@@ -291,20 +297,20 @@ public final class CiwsCoordinator {
                 tracks.add(t);
             }
         } catch (RuntimeException invalidRadar) { return null; }
-        return tracks;
+        return new RadarSnapshot(tracks, scanProjectiles, scanContraptions);
     }
 
     private static boolean heldTargetStillValid(ServerLevel level, CompactCannonMountBlockEntity mount, Actor actor, IRadar radar, long now) {
         CompoundTag data = mount.getPersistentData();
         if (!data.hasUUID(RESERVED) || !data.hasUUID(TARGET) || !data.getUUID(RESERVED).equals(data.getUUID(TARGET))) return false;
         UUID expected = data.getUUID(TARGET);
-        List<RadarTrack> tracks = projectileTracks(radar);
-        if (tracks == null) return false;
-        for (RadarTrack track : tracks) {
+        RadarSnapshot radarSnapshot = projectileTracks(radar);
+        if (radarSnapshot == null) return false;
+        for (RadarTrack track : radarSnapshot.tracks()) {
             UUID id = CiwsPolicy.projectileId(track.trackCategory() == TrackCategory.PROJECTILE, track.id(), now, track.scannedTime());
             if (!expected.equals(id) || !finite(track.position()) || !finite(track.velocity())) continue;
             Entity entity = level.getEntity(id);
-            if (entity == null || !entity.isAlive() || !CombatServices.projectile(entity)) return false;
+            if (entity == null || !entity.isAlive() || !CombatServices.projectile(entity) || !sensorAllows(radarSnapshot, entity)) return false;
             MilitaryContact contact = CombatServices.resolve(level, new TargetId(TargetId.Kind.ENTITY, id)).orElse(null);
             if (contact == null || !CiwsPolicy.eligible(true, contact.projectile(), actor.owner(), contact.owner(), actor.platform(), contact.platform(),
                     CombatServices.relation(level, actor, contact), CombatServices.canEngage(level, actor, contact))) return false;
@@ -312,6 +318,11 @@ public final class CiwsCoordinator {
             return finite(offset) && finite(velocity) && Double.isFinite(CiwsPolicy.approaching(offset.x, offset.y, offset.z, velocity.x, velocity.y, velocity.z));
         }
         return false;
+    }
+
+    private static boolean sensorAllows(RadarSnapshot snapshot, Entity target) {
+        return snapshot != null && target != null && CiwsPolicy.sensorAllows(snapshot.scanProjectiles(),
+                snapshot.scanContraptions(), target instanceof AbstractContraptionEntity);
     }
 
     private static boolean safePath(ServerLevel level, Actor actor, PitchOrientedContraptionEntity cannon, Entity target,

@@ -117,6 +117,8 @@ tasks.register('ciwsPolicyRegression', JavaExec) {
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'local.cmi.weapons.CiwsPolicyRegression'
 }
+// This regression inspects the packaged 1.21.1 datapack path as well as source resources.
+tasks.named('ciwsPolicyRegression') { dependsOn 'jar' }
 tasks.register('mountedBlockReferenceRegression', JavaExec) {
     dependsOn 'testClasses'
     classpath = sourceSets.test.runtimeClasspath

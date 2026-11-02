@@ -54,18 +54,28 @@ function ZipText([string]$jar, [string]$entry) {
         try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
     } finally { $archive.Dispose() }
 }
+function ZipHasEntry([string]$jar, [string]$entry) {
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($jar)
+    try { return $null -ne $archive.GetEntry($entry) } finally { $archive.Dispose() }
+}
 
 RequireHash $NeoWarfare 'cbcmodernwarfare-0.0.6v+mc.1.21.1-neoforge.jar'
 RequireHash $Radars 'create-radars-0.4.9.4.jar'
 RequireHash $CBC 'createbigcannons-5.11.7+mc.1.21.1.jar'
 RequireHash $Create 'create-1.21.1-6.0.10.jar'
 
-$tagPath = 'data/create_radar/tags/entity_types/radar_projectile.json'
+$tagPath = 'data/create_radar/tags/entity_type/radar_projectile.json'
+$obsoleteTagPath = 'data/create_radar/tags/entity_types/radar_projectile.json'
 $expectedTag = '{"replace":false,"values":["cbcmodernwarfare:munitions_contraption"]}'
-$sourceTag = (Get-Content -Raw -LiteralPath (Join-Path $repo "src/main/resources/$tagPath")).Replace("`r", '').Replace("`n", '').Replace(' ', '').Replace("`t", '')
+$sourceTagFile = Join-Path $repo "src/main/resources/$tagPath"
+$obsoleteSourceTagFile = Join-Path $repo "src/main/resources/$obsoleteTagPath"
+if (-not (Test-Path -LiteralPath $sourceTagFile -PathType Leaf)) { throw "Missing Minecraft 1.21.1 singular entity_type source tag: $tagPath" }
+if (Test-Path -LiteralPath $obsoleteSourceTagFile) { throw "Obsolete plural entity_types source tag must be removed: $obsoleteTagPath" }
+$sourceTag = (Get-Content -Raw -LiteralPath $sourceTagFile).Replace("`r", '').Replace("`n", '').Replace(' ', '').Replace("`t", '')
 if ($sourceTag -ne $expectedTag) { throw "Source tag must append only cbcmodernwarfare:munitions_contraption with replace=false" }
 $artifactTag = (ZipText $Artifact $tagPath).Replace("`r", '').Replace("`n", '').Replace(' ', '').Replace("`t", '')
 if ($artifactTag -ne $expectedTag) { throw "Packaged artifact tag does not match the verified source tag" }
+if (ZipHasEntry $Artifact $obsoleteTagPath) { throw "Artifact contains obsolete plural entity_types tag path: $obsoleteTagPath" }
 
 $registrations = Listing $NeoWarfare 'riftyboi.cbcmodernwarfare.index.CBCModernWarfareEntityTypes'
 Has $registrations 'MUNITIONS_CONTRAPTION' 'Neo Warfare entity registry entry'
@@ -121,9 +131,24 @@ $ciws = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/main/java/local/cmi/
 foreach ($term in @('radar.getTracks()', 'TrackCategory.PROJECTILE', 'CiwsPolicy.projectileId', 'level.getEntity(id)', 'CombatServices.resolve', 'CombatServices.relation', 'CombatServices.canEngage', 'CiwsPolicy.approaching', 'TrajectorySafety.clear', 'WeaponAdapters.fire')) {
     Has $ciws $term 'existing radar/IFF/CIWS path'
 }
-foreach ($term in @('RadarScanningBlockBehavior.TYPE', 'filters.cmi$scanContraptions()', 'filters.cmi$scanProjectiles()', 'if (!filters.cmi$scanContraptions() || !filters.cmi$scanProjectiles()) return null;')) {
-    Has $ciws $term 'fail-closed CIWS radar filter gate'
+foreach ($term in @('RadarScanningBlockBehavior.TYPE', 'filters.cmi$scanContraptions()', 'filters.cmi$scanProjectiles()', 'if (!scanProjectiles) return null;', 'CiwsPolicy.sensorAllows(snapshot.scanProjectiles()', 'target instanceof AbstractContraptionEntity')) {
+    Has $ciws $term 'per-entity CIWS radar filter policy'
 }
+if ($ciws.Contains('if (!filters.cmi$scanContraptions() || !filters.cmi$scanProjectiles()) return null;')) {
+    throw 'CIWS must not reject ordinary PROJECTILE tracks solely because scanContraptions is disabled'
+}
+$planStart = $ciws.IndexOf('private static List<Plan> plans(')
+$snapshotStart = $ciws.IndexOf('private static RadarSnapshot projectileTracks(')
+if ($planStart -lt 0 -or $snapshotStart -le $planStart) { throw 'Cannot isolate CIWS acquisition source' }
+$plans = $ciws.Substring($planStart, $snapshotStart - $planStart)
+$heldStart = $ciws.IndexOf('private static boolean heldTargetStillValid(')
+$sensorStart = $ciws.IndexOf('private static boolean sensorAllows(')
+if ($heldStart -lt 0 -or $sensorStart -le $heldStart) { throw 'Cannot isolate CIWS lock/reservation validation source' }
+$held = $ciws.Substring($heldStart, $sensorStart - $heldStart)
+Ordered $plans @('level.getEntity(id)', 'sensorAllows(radarSnapshot, target)') 'entity resolution before acquisition filter'
+Ordered $held @('level.getEntity(id)', 'sensorAllows(radarSnapshot, entity)') 'entity resolution before held/reserved target filter'
+$policy = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/main/java/local/cmi/weapons/CiwsPolicy.java')
+Has $policy 'return scanProjectiles && (!contraptionEntity || scanContraptions);' 'normal projectile versus contraption sensor-filter truth table'
 $access = Listing $Artifact 'local.cmi.mixin.weapons.RadarScanningFilterAccess'
 Descriptor $access 'cmi$scanContraptions' '()Z'
 Descriptor $access 'cmi$scanProjectiles' '()Z'

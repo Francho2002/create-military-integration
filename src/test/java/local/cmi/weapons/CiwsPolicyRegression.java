@@ -4,6 +4,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.UUID;
+import java.util.zip.ZipFile;
 import local.cmi.core.Relation;
 import local.cmi.core.ReservationBook;
 
@@ -32,6 +33,15 @@ public final class CiwsPolicyRegression {
         check(!CiwsPolicy.eligible(true,true,own,null,null,null,Relation.ENEMY,true),"missing owner");
         check(!CiwsPolicy.eligible(true,true,own,a,b,b,Relation.ENEMY,true),"own platform");
         check(!CiwsPolicy.eligible(true,true,own,a,null,null,Relation.ENEMY,false),"protected target");
+        check(CiwsPolicy.sensorAllows(true,true,false),"normal projectile: both filters enabled");
+        check(CiwsPolicy.sensorAllows(true,false,false),"normal projectile: projectile filter alone is sufficient");
+        check(!CiwsPolicy.sensorAllows(false,true,false),"normal projectile: disabled projectile filter rejects");
+        check(!CiwsPolicy.sensorAllows(false,false,false),"normal projectile: both filters disabled reject");
+        check(CiwsPolicy.sensorAllows(true,true,true),"contraption projectile: both physical/category filters enabled");
+        check(!CiwsPolicy.sensorAllows(true,false,true),"contraption projectile: disabled physical query rejects");
+        check(!CiwsPolicy.sensorAllows(false,true,true),"contraption projectile: disabled category filter rejects");
+        check(!CiwsPolicy.sensorAllows(false,false,true),"contraption projectile: both filters disabled reject");
+        check(!CiwsPolicy.eligible(true,true,own,null,null,null,Relation.UNKNOWN,false),"PROJECTILE track without known owner cannot authorize fire");
         check(CiwsPolicy.approaching(10,0,0,-2,0,0)==5,"incoming");
         check(Double.isNaN(CiwsPolicy.approaching(10,0,0,2,0,0)),"receding");
         check(Double.isNaN(CiwsPolicy.approaching(10,0,0,0,0,0)),"stationary");
@@ -77,14 +87,34 @@ public final class CiwsPolicyRegression {
         check(coordinator.indexOf("if (!safePath(level, actor, cannon, plan.target()")<coordinator.indexOf("WeaponAdapters.fire("),"unsafe actual trajectory blocks request");
         check(coordinator.contains("if (!safePath(level, actor, cannon, target, pivot, solver, solution.direction()"),"blocked planned trajectory is not reserved");
         check(!coordinator.contains("new AbstractCannonProjectile")&&!coordinator.contains("CombatServices.neutralize("),"no synthetic spawn or predicted neutralization");
-        String radarTag=Files.readString(Path.of("src/main/resources/data/create_radar/tags/entity_types/radar_projectile.json")).replaceAll("\\s+","");
+        String radarTagPath="data/create_radar/tags/entity_type/radar_projectile.json";
+        String obsoleteRadarTagPath="data/create_radar/tags/entity_types/radar_projectile.json";
+        Path sourceRadarTag=Path.of("src/main/resources").resolve(radarTagPath);
+        Path obsoleteSourceRadarTag=Path.of("src/main/resources").resolve(obsoleteRadarTagPath);
+        check(Files.isRegularFile(sourceRadarTag),"Minecraft 1.21.1 singular entity_type tag path exists");
+        check(!Files.exists(obsoleteSourceRadarTag),"obsolete plural entity_types source path is absent");
+        String radarTag=Files.readString(sourceRadarTag).replaceAll("\\s+","");
         check(radarTag.equals("{\"replace\":false,\"values\":[\"cbcmodernwarfare:munitions_contraption\"]}"),"only the verified Neo Warfare multiblock entity is tagged as a radar projectile");
+        try (ZipFile artifact = new ZipFile("build/libs/create-military-integration-0.1.0-dev.jar")) {
+            check(artifact.getEntry(radarTagPath)!=null,"singular radar tag is packaged in final JAR");
+            check(artifact.getEntry(obsoleteRadarTagPath)==null,"final JAR excludes obsolete plural radar tag path");
+            String packaged;
+            try (var input=artifact.getInputStream(artifact.getEntry(radarTagPath))) {
+                packaged=new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8).replaceAll("\\s+","");
+            }
+            check(packaged.equals("{\"replace\":false,\"values\":[\"cbcmodernwarfare:munitions_contraption\"]}"),"final JAR has exact append-only projectile tag");
+        }
         String combat=Files.readString(Path.of("src/main/java/local/cmi/core/CombatServices.java"));
         check(combat.contains("e instanceof riftyboi.cbcmodernwarfare.munitions.contraptions.MunitionsPhysicsContraptionEntity"),"real multiblock entity remains recognized as a projectile");
         check(coordinator.contains("CiwsPolicy.projectileId(track.trackCategory() == TrackCategory.PROJECTILE, track.id(), now, track.scannedTime())")&&coordinator.contains("level.getEntity(id)")&&coordinator.contains("CombatServices.resolve(level, new TargetId(TargetId.Kind.ENTITY, id))"),"radar UUID resolves back to live entity and current contact");
         check(coordinator.contains("CombatServices.relation(level, actor, contact)")&&coordinator.contains("CombatServices.canEngage(level, actor, contact)"),"radar classification never replaces ownership/IFF authorization");
-        check(coordinator.contains("filters.cmi$scanContraptions()")&&coordinator.contains("filters.cmi$scanProjectiles()"),"CIWS honors both the physical contraption query and projectile category switches");
-        check(coordinator.contains("if (!filters.cmi$scanContraptions() || !filters.cmi$scanProjectiles()) return null;"),"a disabled radar filter fails closed before tracks become CIWS candidates");
+        check(coordinator.contains("filters.cmi$scanContraptions()")&&coordinator.contains("filters.cmi$scanProjectiles()"),"CIWS reads both physical radar filters");
+        check(coordinator.contains("if (!scanProjectiles) return null;")&&!coordinator.contains("if (!filters.cmi$scanContraptions() || !filters.cmi$scanProjectiles()) return null;"),"disabled projectile filter rejects globally without rejecting normal projectiles when contraption scan is off");
+        check(coordinator.contains("target instanceof AbstractContraptionEntity")&&coordinator.contains("CiwsPolicy.sensorAllows(snapshot.scanProjectiles(),"),"resolved entity type selects the additional contraption filter");
+        String plans=coordinator.substring(coordinator.indexOf("private static List<Plan> plans("),coordinator.indexOf("private static RadarSnapshot projectileTracks("));
+        String held=coordinator.substring(coordinator.indexOf("private static boolean heldTargetStillValid("),coordinator.indexOf("private static boolean sensorAllows("));
+        check(plans.indexOf("level.getEntity(id)")>=0&&plans.indexOf("sensorAllows(radarSnapshot, target)")>plans.indexOf("level.getEntity(id)"),"acquisition applies radar sensor filter after UUID resolves to an entity");
+        check(held.indexOf("level.getEntity(id)")>=0&&held.indexOf("sensorAllows(radarSnapshot, entity)")>held.indexOf("level.getEntity(id)"),"held/reserved target revalidation applies the same filter after resolving entity");
         String mixins=Files.readString(Path.of("src/main/resources/cmi.mixins.json"));
         check(mixins.contains("weapons.RadarScanningFilterAccess"),"read-only radar filter accessor is registered");
         String compact=Files.readString(Path.of("src/main/java/local/cmi/weapons/CompactCoordinator.java"));

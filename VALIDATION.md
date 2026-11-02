@@ -241,7 +241,7 @@ Exigir `impact_confirmed` con el Sable correcto, `area_candidates` con más de u
 
 - Neo Warfare `0.0.6v` registra `MUNITIONS_CONTRAPTION` con la clase `MunitionsPhysicsContraptionEntity`; su namespace de Registrate es `cbcmodernwarfare`, por lo que el ID comprobado por bytecode es `cbcmodernwarfare:munitions_contraption`.
 - La clase hereda `OrientedContraptionEntity` de Create, y por tanto `AbstractContraptionEntity`; no es una subclase de Minecraft `Projectile`. El scanner de Radars 0.4.9.4 consulta esta familia solo en su barrido `scanContraptions`. El tag `radar_projectile` se consulta antes del fallback `AbstractContraptionEntity`, así el track resultante es PROJECTILE.
-- El barrido de Radars ocurre cada 5 ticks y conserva sus límites nativos de rango/FOV. CMI no enumera entidades como sensor. Antes de consumir el snapshot, exige que los flags físicos `scanContraptions` y `scanProjectiles` estén ambos habilitados. No modifica esos flags. Si la consulta física de contraptions está desactivada, el filtro de proyectiles por sí solo no puede descubrir esta entidad; si el flag de proyectiles está apagado, CIWS falla cerrado aunque Radars haya producido un track etiquetado.
+- El barrido de Radars ocurre cada 5 ticks y conserva sus límites nativos de rango/FOV. CMI no enumera entidades como sensor. `scanProjectiles` es obligatorio para todo candidato; luego de resolver el UUID al entity real, `scanContraptions` es obligatorio solo si esa entidad es `AbstractContraptionEntity`. No modifica flags. Así el tag no permite adquirir una contraption cuando su consulta física está apagada, y el flag de proyectiles apagado rechaza incluso un track que Radars ya haya etiquetado.
 - `RadarTrack(Entity)` toma `Entity.getUUID().toString()`, posición, `getDeltaMovement()`, hora del nivel y categoría. CMI valida el UUID canónico y reciente, resuelve la entidad viva por UUID, vuelve a crear el contacto actual y requiere identidad de proyectil, owner conocido, ENEMY y `canEngage` antes de seleccionar.
 - El lanzador crea/posiciona/dispara la contraption y llama a `ServerLevel.addFreshEntity` desde `MountedMunitionsLauncherContraption.fireShot`. `ShotOwnershipMixin` envuelve ese método y mantiene `ShotContext` hasta que el alta de entidad invoca `EntityJoinLevelEvent`. El owner no se infiere de la ubicación ni del radar. La asignación se omite si no hay actor/owner, y el CIWS rechaza UNKNOWN.
 - `MunitionsPhysicsContraptionEntity` integra el movimiento en `setContraptionMotion`; `shoot`, `tick` y el override de `setDeltaMovement` usan esa ruta. El snapshot de velocidad es el movimiento real actual de la entidad, pero no predice empuje/maniobras futuras. Sus límites de contraption se derivan de los bloques de munición y del margen fijo de 0.25 de Warium; CMI usa el `getBoundingBox()` de la entidad resuelta para la tolerancia.
@@ -249,11 +249,40 @@ Exigir `impact_confirmed` con el Sable correcto, `area_candidates` con más de u
 
 ## Cambios y comprobaciones
 
-- Se añadió `data/create_radar/tags/entity_types/radar_projectile.json` con el único valor `cbcmodernwarfare:munitions_contraption` y `replace:false`.
-- `CiwsCoordinator.projectileTracks` consulta el comportamiento físico real del radar mediante un accessor de solo lectura y exige ambos flags relevantes. El tag no convierte al radar en un escáner global ni cambia range, FOV, cadencia, lock, solver, reservas, arma ni disparo nativo.
+- Se corrigió la ruta del tag a `data/create_radar/tags/entity_type/radar_projectile.json`, singular según Minecraft 1.21.1, conservando `replace:false` y el único valor `cbcmodernwarfare:munitions_contraption`.
+- `CiwsCoordinator.projectileTracks` conserva los flags leídos con accessor de solo lectura. Después de resolver cada UUID al entity real, `CiwsPolicy.sensorAllows` aplica `scanProjectiles && (!esContraption || scanContraptions)` tanto en adquisición como en validación de lock/reserva. Un proyectil CBC normal no depende de `scanContraptions`; una munición contraption sí. El radar mantiene sus opciones; no se cambian range, FOV, cadencia, lock, solver, reservas, arma ni disparo nativo.
 - `CiwsPolicyRegression` comprueba el contenido exacto del tag, la correlación track/entity y la guarda de filtros/IFF. `ShotContextRegression` comprueba el scope del `fireShot` nativo y la propagación de owner/platform al alta de la entidad.
 - `Verify-MultiblockMissileRadar.ps1` contrasta hashes fijados, registro/tipo/herencia/launcher/velocidad/AABB de Neo Warfare, tag/categoría/barrido/tracks de Radars, ruta de procedencia, IFF CIWS y la ruta CBC de colisión; también exige el recurso en el artefacto.
 
 **ACREDITADO ESTÁTICAMENTE:** `clean build --offline` pasó y ejecutó correctamente las 12 suites: `guidanceModeRegression`, `managedGuidanceNbtRegression`, `geometryIntersectionRegression`, `radarSpearModeRegression`, `radarSpearImpactRegression`, `radarSpearStructuralRegression`, `radarSpearBlastGeometryRegression`, `shotContextRegression`, `shipOwnershipRegression`, `radarSpearLockRegression`, `ciwsPolicyRegression` y `mountedBlockReferenceRegression`. Pasaron los 12 verificadores: `Verify-Artifact.ps1`, `Verify-CIWS.ps1`, `Verify-Geometry.ps1`, `Verify-GuidanceBytecode.ps1`, `Verify-MixinTargets.ps1`, `Verify-RadarAutomation.ps1`, `Verify-RadarSpearArea.ps1`, `Verify-RadarSpearArrowCollision.ps1`, `Verify-RadarSpearBytecode.ps1`, `Verify-SableBytecode.ps1`, `Verify-SableMountedSystems.ps1` y `Verify-MultiblockMissileRadar.ps1`. `git diff --check` pasó. SHA-256 del artefacto: `8AD901B6C5986E13C1BE455795C45DC9346CDD22FB2E9987D40D8AF52A443134`.
 
 **PENDIENTE DE VALIDACIÓN EN JUEGO:** que el radar produzca el track durante el movimiento real de esta munición, que el lock sobreviva su física/thrust, que una ronda CBC interseque el AABB y que el hook neutralice el misil efectivamente. No se ejecutó Minecraft, servidor, cliente ni GameTest.
+
+## Ciclo 2I.1 — ruta del tag 1.21.1 y filtros CIWS por tipo
+
+### Cambios
+
+- La causa del tag no detectado era el nombre de directorio plural. Para Minecraft 1.21.1 la ruta queda en `data/create_radar/tags/entity_type/radar_projectile.json`; el JSON conserva exactamente `replace:false` y un solo valor, `cbcmodernwarfare:munitions_contraption`. Se eliminó la ruta `entity_types`.
+- `CiwsPolicy.sensorAllows` implementa la matriz por clase de entidad. CIWS lee los dos flags mediante el accessor existente, de solo lectura. Resuelve el UUID del track a entidad y aplica: todo candidato necesita `scanProjectiles`; una entidad `AbstractContraptionEntity` además necesita `scanContraptions`. Proyectiles CBC normales no requieren el filtro de contraptions. La regla se aplica durante adquisición y revalidación del target retenido/reservado.
+- No cambian tracks físicos, frescura, IFF, ownership, lock, reservas, solver, seguridad de trayectoria, disparo nativo ni configuración del radar. Un track PROJECTILE no evita los rechazos por identidad/owner/IFF.
+- `CiwsPolicyRegression` verifica las ocho combinaciones, owner desconocido, relaciones no hostiles, resolución del UUID antes del filtro en adquisición y revalidación, ruta singular y JSON exacto en fuentes y JAR. `Verify-CIWS.ps1` y `Verify-MultiblockMissileRadar.ps1` verifican los mismos contratos; el último rechaza la ruta plural en fuentes y artefacto.
+
+### Validación estática ejecutada
+
+- `clean build --offline` terminó con `BUILD SUCCESSFUL`; ejecutó las 12 regresiones Java, incluida `ciwsPolicyRegression`.
+- Pasaron los 12 verificadores: `Verify-Artifact.ps1`, `Verify-CIWS.ps1`, `Verify-Geometry.ps1`, `Verify-GuidanceBytecode.ps1`, `Verify-MixinTargets.ps1`, `Verify-MultiblockMissileRadar.ps1`, `Verify-RadarAutomation.ps1`, `Verify-RadarSpearArea.ps1`, `Verify-RadarSpearArrowCollision.ps1`, `Verify-RadarSpearBytecode.ps1`, `Verify-SableBytecode.ps1` y `Verify-SableMountedSystems.ps1`.
+- La regresión y el verificador confirmaron que el JAR tiene `data/create_radar/tags/entity_type/radar_projectile.json` con el contenido exacto y no tiene `data/create_radar/tags/entity_types/radar_projectile.json`. SHA-256 del JAR: `7C54267AFDF6402B57FA2CC87A975DD2C5A559559CFD154AE611BC57B1460C5F`.
+- `git diff --check` pasó.
+
+| scanProjectiles | scanContraptions | Projectile normal | AbstractContraptionEntity clasificada PROJECTILE |
+|---|---|---|---|
+| true | true | Permitido por filtro | Permitido por filtro |
+| true | false | Permitido por filtro | Rechazado |
+| false | true | Rechazado | Rechazado |
+| false | false | Rechazado | Rechazado |
+
+“Permitido” aquí solo significa que pasa el filtro del sensor; track reciente, entidad viva, owner, IFF ENEMY, `canEngage`, lock, solver y trayectoria segura siguen siendo obligatorios.
+
+### PENDIENTE DE VALIDACIÓN EN JUEGO
+
+No se inició Minecraft, cliente, servidor ni GameTest. La aplicación efectiva del tag al cargar datapacks y la detección/intercepción en partida siguen pendientes. No se cambiaron los JAR instalados en cliente o servidor.

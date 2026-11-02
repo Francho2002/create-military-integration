@@ -136,8 +136,20 @@ foreach($forbidden in @('CombatServices.contacts(','getAllEntities(','Sensor.sca
 }
 Ordered $source @('safePath(level, actor, cannon, plan.target()','CombatServices.canEngage(level, actor, current)','CombatServices.reserve(level, current.id()','FIRE_PERMIT.set','WeaponAdapters.fire') 'final corridor / revalidation / reservation / scoped native firing'
 Has $source 'safePath(level, actor, cannon, target, pivot, solver, solution.direction()' 'candidate corridor before reservation'
-$budget=Section $source 'private static List<RadarTrack> projectileTracks(IRadar radar) {'
-Ordered $budget @('++scanned, MAX_TRACKS','t.trackCategory() != TrackCategory.PROJECTILE') 'entire radar snapshot budget'
+$budget=Section $source 'private static RadarSnapshot projectileTracks(IRadar radar) {'
+Ordered $budget @('filters.cmi$scanProjectiles()','filters.cmi$scanContraptions()','if (!scanProjectiles) return null;','radar.getTracks()','++scanned, MAX_TRACKS','t.trackCategory() != TrackCategory.PROJECTILE') 'bounded radar snapshot and required projectile-category switch'
+if ($budget.Contains('if (!filters.cmi$scanContraptions() || !filters.cmi$scanProjectiles()) return null;')) { throw 'Contraption scan must not globally gate normal Projectile tracks' }
+Has $source 'CiwsPolicy.sensorAllows(snapshot.scanProjectiles()' 'shared per-entity sensor policy'
+Has $source 'target instanceof AbstractContraptionEntity' 'physical contraption classification after UUID resolution'
+$planStart=$source.IndexOf('private static List<Plan> plans(')
+$snapshotStart=$source.IndexOf('private static RadarSnapshot projectileTracks(')
+$heldStart=$source.IndexOf('private static boolean heldTargetStillValid(')
+$sensorStart=$source.IndexOf('private static boolean sensorAllows(')
+if ($planStart -lt 0 -or $snapshotStart -le $planStart -or $heldStart -lt 0 -or $sensorStart -le $heldStart) { throw 'Cannot isolate CIWS acquisition and retained-target checks' }
+$plans=$source.Substring($planStart,$snapshotStart-$planStart)
+$held=$source.Substring($heldStart,$sensorStart-$heldStart)
+Ordered $plans @('level.getEntity(id)','sensorAllows(radarSnapshot, target)') 'acquisition resolves entity before applying physical sensor filters'
+Ordered $held @('level.getEntity(id)','sensorAllows(radarSnapshot, entity)') 'lock/reservation revalidation resolves entity before applying physical sensor filters'
 $mix=Get-Content -Raw -LiteralPath (Join-Path $repo 'src/main/resources/cmi.mixins.json')
 foreach($term in @('safety.CiwsFireGuardMixin','weapons.AutocannonMaterialAccess')) { Has $mix $term 'registered CIWS mixin' }
 $guard=Listing $Artifact 'local.cmi.mixin.safety.CiwsFireGuardMixin'
