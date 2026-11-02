@@ -336,3 +336,13 @@ Pasaron los 13 verificadores: `Verify-Artifact.ps1`, `Verify-CIWS.ps1`, `Verify-
 SHA-256 de `build/libs/create-military-integration-0.1.0-dev.jar`: `7913F56F10011D486787976F2C3EBCFAB50D9D28AFCBDB4C59E62F2EF65A3BA9`.
 
 No se ejecutaron Minecraft, cliente, servidor ni GameTest; no se copiaron JARs instalados. Las integraciones de predicción y disparo siguen sin acreditación runtime.
+
+## Ciclo 2K — coordinación entre CIWS
+
+La nueva `ciwsCoordinationRegression` incluye 12 escenarios A–L: fallback X→Y, exclusividad con una amenaza, tres monturas/dos amenazas, expiración, pérdida de ownership, reset de lock al cambiar UUID, falta de solución y timeout de preparación, protección de una reserva IN_FLIGHT ante cambio de prioridad, timestamp repetido, IFF, aislamiento entre radares y límite de candidatos. La regresión de coordinación pasa en `clean build --offline`; el build ejecutó **14 suites Java** (13 existentes + la suite nueva).
+
+La API CBC 5.11.7 fijada declara `fireShot(ServerLevel, PitchOrientedContraptionEntity): void`. `WeaponAdapters.fire` retorna `true` después de que esa llamada retorne normalmente, pero su propio contrato advierte que el cannon puede rechazar el disparo. Por ello, el hold post-request sigue siendo conservador y no acredita generación de proyectil ni intercepción.
+
+Los 13 verificadores previos y `Verify-CiwsCoordination.ps1` (14 en total) aprobaron. También aprobó `git diff --check`. SHA-256 de `build/libs/create-military-integration-0.1.0-dev.jar`: `12A264A09AF86BE455538CE3C849D9DF1B9377437AFFD9F0561F56819CAABE20`.
+
+Sin Minecraft, servidor, GameTest ni despliegues; el funcionamiento y el reparto real de fuego entre varias monturas permanecen **PENDIENTES DE VALIDACIÓN EN JUEGO**.

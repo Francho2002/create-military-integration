@@ -2,6 +2,15 @@
 
 Esta tabla describe el código, no una prueba dentro de Minecraft. Compilación no demuestra aplicación correcta de mixins.
 
+## Ciclo 2K — coordinación local entre CIWS
+
+- Cada montura mantiene su propia fuente de adquisición `IRadar.getTracks()`. `CiwsCoordinationPolicy` deduplica y ordena los planes locales: conserva primero el blanco anterior si sigue en los planes, después menor tiempo de aproximación, distancia y UUID. El límite continúa en ocho candidatos; los planes y soluciones se calculan una vez y luego solo se prueban las reservas.
+- Ante una reserva ajena, la montura prueba el siguiente plan válido. Si cambia de blanco, libera solo su reserva anterior; `CiwsPolicy.observe` inicia un lock de una muestra para el nuevo UUID. Si no hay alternativa asignable, libera su lock y no dispara. El estado compartido sigue limitado a las reservas existentes por `TargetId` y propietario de montura; no se añadió un scheduler ni un sensor global.
+- Una reserva **PREPARING** dura 10 ticks y puede renovarse durante 40 ticks (ocho barridos del radar) para acumular lock y orientar el cañón. Si vence, la montura libera su reserva y difiere ese UUID localmente durante 10 ticks (dos barridos), pudiendo atender otra amenaza mientras otra montura lo intenta. El defer no afecta a otras monturas ni permite atacar un contacto que no figure en su radar.
+- Una reserva **IN_FLIGHT** conserva el plazo previsto de vuelo y la revalidación existente; no se reduce por la política de preparación. La ruta CBC fijada usa `fireShot(...): void`; `WeaponAdapters.fire` solo confirma que la llamada nativa retornó por su ruta de dispatch, y el cannon puede rechazarla internamente. Por eso el HOLD es una protección conservadora contra fuego duplicado, no una confirmación de proyectil creado o de intercepción. CMI no anuncia una intercepción por el mero intento.
+- IFF, `canEngage`, filtros/track físico, solver, alineación, trayectoria, permiso de un solo uso y fuego nativo conservan sus guardas. El coordinador sigue siendo local y puede no ser globalmente óptimo cuando varias armas compiten, hay pérdida de tracks o la preparación expira.
+- Verificación estática del ciclo: `clean build --offline`, 14 suites Java y 14 verificadores aprobados; SHA-256 del JAR `create-military-integration-0.1.0-dev.jar`: `12A264A09AF86BE455538CE3C849D9DF1B9377437AFFD9F0561F56819CAABE20`. La distribución real entre monturas y la respuesta física del arma siguen pendientes de validación en juego.
+
 ## Ciclo 2J.1 — mantenimiento del historial CIWS
 
 - **LRU:** la expulsión ahora itera `activeObservers.entrySet()` y toma el observador de `Entry.getValue()` antes de `Iterator.remove()`. Ya no consulta el mapa de acceso mientras su iterador está activo; se conserva `MAX_ENTRIES = 2048` y se eliminan los historiales del observador expulsado.

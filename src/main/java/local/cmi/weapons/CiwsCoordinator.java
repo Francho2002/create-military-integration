@@ -52,6 +52,8 @@ public final class CiwsCoordinator {
     private static final String TARGET = "cmiCiwsTarget", SCAN = "cmiCiwsScan", SAMPLES = "cmiCiwsSamples";
     private static final String LAST_UPDATE = "cmiCiwsLastUpdate", LAST_FIRE = "cmiCiwsLastFireScan", HOLD = "cmiCiwsFireHoldUntil";
     private static final String RESERVED = "cmiCiwsReservedTarget";
+    private static final String PREPARING_TARGET = "cmiCiwsPreparingTarget", PREPARING_SINCE = "cmiCiwsPreparingSince";
+    private static final String DEFERRED_TARGET = "cmiCiwsDeferredTarget", DEFERRED_UNTIL = "cmiCiwsDeferredUntil";
     private static final int MAX_TRACKS = 128, MAX_CANDIDATES = 8, MAX_FLIGHT_TICKS = 200;
     private static final ThreadLocal<FirePermit> FIRE_PERMIT = new ThreadLocal<>();
     private static final WeakHashMap<CompactCannonMountBlockEntity, Boolean> SEEN = new WeakHashMap<>();
@@ -103,6 +105,7 @@ public final class CiwsCoordinator {
         data.putString(RADAR_DIM, level.dimension().location().toString());
         data.putLong(RADAR_POS, radarPos.asLong());
         data.put("cmiRadarReference", MountedBlockReference.world(level.dimension().location(), radarPos).save());
+        clearDeferred(data);
         mount.setChanged();
         return null;
     }
@@ -133,6 +136,7 @@ public final class CiwsCoordinator {
 
         data.put("cmiCiwsSableRadarReference", radarRef.save());
         data.putBoolean("cmiCiwsSableBindingExecutable", false);
+        clearDeferred(data);
         mount.setChanged();
         return null;
     }
@@ -155,12 +159,14 @@ public final class CiwsCoordinator {
         CompoundTag data = mount.getPersistentData();
         data.putBoolean(MODE, enabled);
         data.remove(LAST_UPDATE); data.remove(LAST_FIRE); data.remove(HOLD);
+        clearDeferred(data);
         mount.setChanged();
     }
 
     /** Disables a plot-mounted mode without treating the plot storage position as a world reservation key. */
     public static void disableNonExecutableMounted(CompactCannonMountBlockEntity mount) {
         mount.getPersistentData().putBoolean(MODE, false);
+        clearDeferred(mount.getPersistentData());
         if (mount.getLevel() instanceof ServerLevel level)
             MOTION.clearMount(level.dimension().location().toString(), mount.getBlockPos().asLong());
         mount.setChanged();
@@ -173,12 +179,14 @@ public final class CiwsCoordinator {
             SEEN.put(mount, Boolean.TRUE);
             clearLock(level, mount);
             data.remove(LAST_UPDATE); data.remove(LAST_FIRE); data.remove(HOLD);
+            clearDeferred(data);
         }
         long now = level.getGameTime();
         String dimension = level.dimension().location().toString();
+        if (now < 0) { clearLock(level, mount); clearDeferred(data); MOTION.clearMount(dimension, mount.getBlockPos().asLong()); return; }
         MOTION.pruneOncePerSweep(dimension, now);
         if (!data.contains(MODE, Tag.TAG_BYTE) || !data.getBoolean(MODE)) {
-            clearLock(level, mount); MOTION.clearMount(dimension, mount.getBlockPos().asLong()); return;
+            clearLock(level, mount); clearDeferred(data); MOTION.clearMount(dimension, mount.getBlockPos().asLong()); return;
         }
         if (now % 5 != 2 || (data.contains(LAST_UPDATE, Tag.TAG_LONG) && data.getLong(LAST_UPDATE) == now)) return;
         data.putLong(LAST_UPDATE, now);
@@ -188,8 +196,9 @@ public final class CiwsCoordinator {
         if (!mainLevel(level, mount.getBlockPos()) || binding.error() != null || !baseReady(level, mount, cannon, actor)) {
             clearLock(level, mount); MOTION.clearMount(dimension, mount.getBlockPos().asLong()); return;
         }
-        // Keep a fired round's reservation until its predicted arrival while the physical radar
-        // still sees the same authorized incoming projectile, even during breech cooldown.
+        // Keep the conservative post-request flight reservation until its predicted arrival while
+        // the physical radar still sees the same authorized target. CBC fireShot is void, so this
+        // hold is not proof that a projectile spawned or that an interception occurred.
         if (data.contains(HOLD, Tag.TAG_LONG) && now <= data.getLong(HOLD)) {
             if (!heldTargetStillValid(level, mount, actor, binding.radar(), now)) { clearLock(level, mount); MOTION.clearMount(dimension, mount.getBlockPos().asLong()); data.remove(HOLD); return; }
             UUID target = data.getUUID(RESERVED);
@@ -204,17 +213,42 @@ public final class CiwsCoordinator {
         var aim = CannonProbe.aim(level, cannon);
         Vec3 pivot = Ships.vec(aim.pivot());
         if (!finite(pivot) || !aim.barrel().isFinite()) { clearLock(level, mount); return; }
-        List<Plan> plans = plans(level, mount, cannon, actor, binding.radar(), shell, aim, pivot, now);
+        boolean hasPreparing = data.contains(PREPARING_TARGET) || data.contains(PREPARING_SINCE);
+        if (hasPreparing && (!data.hasUUID(PREPARING_TARGET) || !data.contains(PREPARING_SINCE, Tag.TAG_LONG))) {
+            clearLock(level, mount); return;
+        }
+        if (hasPreparing && CiwsCoordinationPolicy.preparationExpired(data.getLong(PREPARING_SINCE), now)) {
+            UUID timedOut = data.getUUID(PREPARING_TARGET);
+            clearLock(level, mount);
+            data.putUUID(DEFERRED_TARGET, timedOut);
+            data.putLong(DEFERRED_UNTIL, CiwsCoordinationPolicy.retryUntil(now));
+            mount.setChanged();
+        }
+        UUID deferred = deferredTarget(data, now);
+        List<Plan> plans = plans(level, mount, cannon, actor, binding.radar(), shell, aim, pivot, now, deferred);
         if (plans == null || plans.isEmpty()) { clearLock(level, mount); return; }
         UUID oldTarget = data.hasUUID(TARGET) ? data.getUUID(TARGET) : null;
-        CiwsPolicy.Candidate selected = CiwsPolicy.select(oldTarget, plans.stream().map(Plan::candidate).toList());
-        if (selected == null) { clearLock(level, mount); return; }
-        Plan plan = plans.stream().filter(p -> p.contact().id().uuid().equals(selected.id())).findFirst().orElse(null);
-        if (plan == null) { clearLock(level, mount); return; }
-        if (data.hasUUID(RESERVED) && !data.getUUID(RESERVED).equals(selected.id())) release(level, mount, data.getUUID(RESERVED));
         UUID identity = reservationIdentity(level, mount);
-        if (!CombatServices.reserve(level, plan.contact().id(), identity, 10)) { clearLock(level, mount); return; }
+        CiwsPolicy.Candidate selected = null;
+        Plan plan = null;
+        List<CiwsPolicy.Candidate> ordered = CiwsCoordinationPolicy.orderedCandidates(oldTarget,
+                plans.stream().map(Plan::candidate).toList(), deferred, MAX_CANDIDATES);
+        for (CiwsPolicy.Candidate candidate : ordered) {
+            Plan candidatePlan = plans.stream().filter(p -> p.candidate().equals(candidate)).findFirst().orElse(null);
+            if (candidatePlan == null || !CombatServices.reserve(level, candidatePlan.contact().id(), identity,
+                    CiwsCoordinationPolicy.PREPARING_RESERVATION_TTL_TICKS)) continue;
+            selected = candidate;
+            plan = candidatePlan;
+            break;
+        }
+        if (selected == null || plan == null) { clearLock(level, mount); return; }
+        if (data.hasUUID(RESERVED) && !data.getUUID(RESERVED).equals(selected.id())) release(level, mount, data.getUUID(RESERVED));
         data.putUUID(RESERVED, selected.id());
+        if (!data.hasUUID(PREPARING_TARGET) || !data.getUUID(PREPARING_TARGET).equals(selected.id()) ||
+                !data.contains(PREPARING_SINCE, Tag.TAG_LONG)) {
+            data.putUUID(PREPARING_TARGET, selected.id());
+            data.putLong(PREPARING_SINCE, now);
+        }
         CiwsPolicy.Lock previous = readLock(data);
         CiwsPolicy.Lock lock = CiwsPolicy.observe(previous, selected);
         data.putUUID(TARGET, lock.target()); data.putLong(SCAN, lock.lastScan()); data.putInt(SAMPLES, lock.samples());
@@ -237,15 +271,26 @@ public final class CiwsCoordinator {
         if (!radarTrackStillCurrent(binding.radar(), plan.target(), selected.id(), plan.scannedAt(), now)) { clearLock(level, mount); return; }
         if (!motionStillCurrent(plan, current)) { clearLock(level, mount); return; }
         // Check the whole finite lifetime, including a miss beyond the enemy projectile.
-        if (!safePath(level, actor, cannon, plan.target(), pivot, plan.solver(), aim.barrel(), shell.lifetimeTicks())) return;
-        if (!CombatServices.canEngage(level, actor, current) || !CombatServices.reserve(level, current.id(), identity, (int)Math.ceil(actual.time()) + 2)) return;
+        if (!safePath(level, actor, cannon, plan.target(), pivot, plan.solver(), aim.barrel(), shell.lifetimeTicks())) { clearLock(level, mount); return; }
+        if (!CombatServices.canEngage(level, actor, current) ||
+                !CombatServices.reserve(level, current.id(), identity, (int)Math.ceil(actual.time()) + 2)) { clearLock(level, mount); return; }
+        // Reserve before entering native fireShot to prevent a second same-tick request. The void
+        // native call can still reject internally; LAST_FIRE/HOLD are conservative request state.
         data.putLong(LAST_FIRE, selected.scannedAt());
         data.putLong(HOLD, now + (long)Math.ceil(actual.time()) + 1);
         mount.setChanged();
         FirePermit prior = FIRE_PERMIT.get();
         FIRE_PERMIT.set(new FirePermit(level, cannon));
-        try { WeaponAdapters.fire(level, cannon); }
+        boolean invocationReturned;
+        try { invocationReturned = WeaponAdapters.fire(level, cannon); }
         finally { if (prior == null) FIRE_PERMIT.remove(); else FIRE_PERMIT.set(prior); }
+        if (!invocationReturned) {
+            data.remove(LAST_FIRE);
+            clearLock(level, mount);
+            return;
+        }
+        data.remove(PREPARING_TARGET); data.remove(PREPARING_SINCE);
+        mount.setChanged();
     }
 
     /** Gate native fireShot for CIWS-controlled medium/rotary only; the permit is consumed once. */
@@ -257,7 +302,8 @@ public final class CiwsCoordinator {
 
     private static List<Plan> plans(ServerLevel level, CompactCannonMountBlockEntity mount,
             PitchOrientedContraptionEntity cannon, Actor actor, IRadar radar,
-            com.mrvew.firecontrol.ballistics.ShellModel shell, CannonProbe.Aim aim, Vec3 pivot, long now) {
+            com.mrvew.firecontrol.ballistics.ShellModel shell, CannonProbe.Aim aim, Vec3 pivot, long now,
+            UUID deferredTarget) {
         RadarSnapshot radarSnapshot = projectileTracks(radar);
         if (radarSnapshot == null) {
             MOTION.clearMount(level.dimension().location().toString(), mount.getBlockPos().asLong());
@@ -297,6 +343,7 @@ public final class CiwsCoordinator {
                         motionAssessment.model() == CiwsMotionPolicy.Model.INSUFFICIENT ||
                         motionAssessment.model() == CiwsMotionPolicy.Model.UNRELIABLE) continue;
             }
+            if (id.equals(deferredTarget)) continue;
             Vec3 relative = contact.position().subtract(pivot), velocity = contact.velocity();
             if (!finite(relative) || !finite(velocity)) continue;
             double closest = CiwsPolicy.approaching(relative.x, relative.y, relative.z, velocity.x, velocity.y, velocity.z);
@@ -482,10 +529,25 @@ public final class CiwsCoordinator {
     private static void release(ServerLevel level, CompactCannonMountBlockEntity mount, UUID target) {
         CombatServices.release(level, new TargetId(TargetId.Kind.ENTITY, target), reservationIdentity(level, mount));
     }
+    private static UUID deferredTarget(CompoundTag data, long now) {
+        if (!data.contains(DEFERRED_TARGET) && !data.contains(DEFERRED_UNTIL)) return null;
+        if (!data.hasUUID(DEFERRED_TARGET) || !data.contains(DEFERRED_UNTIL, Tag.TAG_LONG)) {
+            clearDeferred(data);
+            return null;
+        }
+        UUID target = data.getUUID(DEFERRED_TARGET);
+        if (!CiwsCoordinationPolicy.retryDeferred(target, data.getLong(DEFERRED_UNTIL), now)) {
+            clearDeferred(data);
+            return null;
+        }
+        return target;
+    }
+    private static void clearDeferred(CompoundTag data) { data.remove(DEFERRED_TARGET); data.remove(DEFERRED_UNTIL); }
     private static void clearLock(ServerLevel level, CompactCannonMountBlockEntity mount) {
         CompoundTag data = mount.getPersistentData();
         if (data.hasUUID(RESERVED)) release(level, mount, data.getUUID(RESERVED));
         data.remove(RESERVED); data.remove(TARGET); data.remove(SCAN); data.remove(SAMPLES); data.remove(HOLD);
+        data.remove(PREPARING_TARGET); data.remove(PREPARING_SINCE);
         mount.setChanged();
     }
 
