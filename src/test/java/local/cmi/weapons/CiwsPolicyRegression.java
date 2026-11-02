@@ -77,6 +77,16 @@ public final class CiwsPolicyRegression {
         check(coordinator.indexOf("if (!safePath(level, actor, cannon, plan.target()")<coordinator.indexOf("WeaponAdapters.fire("),"unsafe actual trajectory blocks request");
         check(coordinator.contains("if (!safePath(level, actor, cannon, target, pivot, solver, solution.direction()"),"blocked planned trajectory is not reserved");
         check(!coordinator.contains("new AbstractCannonProjectile")&&!coordinator.contains("CombatServices.neutralize("),"no synthetic spawn or predicted neutralization");
+        String radarTag=Files.readString(Path.of("src/main/resources/data/create_radar/tags/entity_types/radar_projectile.json")).replaceAll("\\s+","");
+        check(radarTag.equals("{\"replace\":false,\"values\":[\"cbcmodernwarfare:munitions_contraption\"]}"),"only the verified Neo Warfare multiblock entity is tagged as a radar projectile");
+        String combat=Files.readString(Path.of("src/main/java/local/cmi/core/CombatServices.java"));
+        check(combat.contains("e instanceof riftyboi.cbcmodernwarfare.munitions.contraptions.MunitionsPhysicsContraptionEntity"),"real multiblock entity remains recognized as a projectile");
+        check(coordinator.contains("CiwsPolicy.projectileId(track.trackCategory() == TrackCategory.PROJECTILE, track.id(), now, track.scannedTime())")&&coordinator.contains("level.getEntity(id)")&&coordinator.contains("CombatServices.resolve(level, new TargetId(TargetId.Kind.ENTITY, id))"),"radar UUID resolves back to live entity and current contact");
+        check(coordinator.contains("CombatServices.relation(level, actor, contact)")&&coordinator.contains("CombatServices.canEngage(level, actor, contact)"),"radar classification never replaces ownership/IFF authorization");
+        check(coordinator.contains("filters.cmi$scanContraptions()")&&coordinator.contains("filters.cmi$scanProjectiles()"),"CIWS honors both the physical contraption query and projectile category switches");
+        check(coordinator.contains("if (!filters.cmi$scanContraptions() || !filters.cmi$scanProjectiles()) return null;"),"a disabled radar filter fails closed before tracks become CIWS candidates");
+        String mixins=Files.readString(Path.of("src/main/resources/cmi.mixins.json"));
+        check(mixins.contains("weapons.RadarScanningFilterAccess"),"read-only radar filter accessor is registered");
         String compact=Files.readString(Path.of("src/main/java/local/cmi/weapons/CompactCoordinator.java"));
         check(compact.contains("CiwsCoordinator.hasConfiguredMode(mount)")&&compact.contains("CiwsCoordinator.controls(mount)")&&compact.contains("CombatServices.contacts(level)"),"absent flag preserves general mode; false disables CMI");
         System.out.println("OK: CIWS track, IFF, incoming threat, deterministic lock, solver gates, reservation and one-use authorization");

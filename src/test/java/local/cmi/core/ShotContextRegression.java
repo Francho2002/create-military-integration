@@ -26,6 +26,13 @@ public final class ShotContextRegression {
         check(main.contains("CombatServices.neutralize(level,actor,contact.get())) event.getAffectedEntities().remove(target)"), "neutralized projectile removed from blast victims");
         String hit = java.nio.file.Files.readString(java.nio.file.Path.of("src/main/java/local/cmi/mixin/safety/CannonInterceptionMixin.java"));
         check(hit.split("!self.getPersistentData\\(\\).getBoolean\\(\"cmiManagedShot\"\\)", -1).length == 3, "both collision hooks require managed shot");
+        String ownership = java.nio.file.Files.readString(java.nio.file.Path.of("src/main/java/local/cmi/mixin/safety/ShotOwnershipMixin.java"));
+        check(ownership.contains("MountedMunitionsLauncherContraption") && ownership.contains("@WrapMethod(method=\"fireShot\")"), "Neo Warfare launcher uses the authentic scoped fireShot hook");
+        check(ownership.contains("ShotContext.push(CombatServices.actor(level,carrier))") && ownership.contains("finally{ShotContext.pop();}"), "launcher provenance is limited to its native shot call");
+        check(main.contains("ShotContext.current()") && main.contains("CombatServices.projectile(event.getEntity())") && main.contains("t.putUUID(\"cmiOwner\",actor.owner())"), "entity join receives owner only from launch context");
+        check(main.contains("t.putUUID(\"cmiPlatform\",actor.platform())"), "platform provenance is copied when known");
+        String adapters = java.nio.file.Files.readString(java.nio.file.Path.of("src/main/java/local/cmi/weapons/WeaponAdapters.java"));
+        check(adapters.contains("ShotContext.runManaged(() -> cannon.fireShot(level, entity))"), "CIWS dispatches through native cannon fire with managed provenance");
         System.out.println("ShotContext regression checks passed");
     }
 }

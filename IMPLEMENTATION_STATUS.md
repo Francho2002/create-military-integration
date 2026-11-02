@@ -245,3 +245,23 @@ Los eventos `ExplosionEvent.Detonate` solo cubren explosiones que realmente los 
 ## Aceptación pendiente, sin ejecutar
 
 Carga del mod y mixins sin Simulated Missiles; radar terrestre y a bordo; blancos Sable en rotación; tiro CBC y Neo con munición real; montura compacta; atribución de proyectiles manuales; dos jugadores aliados/neutrales/hostiles; una colonia y reclamación; reserva entre dos lanzadores; misil IR contra nave caliente y contra proyectil; descarga y restauración del mundo. Cada prueba debe comprobar ausencia de fuego al perder identidad o geometría, además del impacto previsto.
+## Ciclo 2I — radar de misiles multibloque Neo Warfare
+
+Estado: implementado a nivel estático; la detección e intercepción real quedan **PENDIENTES DE VALIDACIÓN EN JUEGO**. No se inició Minecraft, cliente, servidor ni GameTest.
+
+| Capacidad | Estado |
+|---|---|
+| Entity type Neo Warfare | IMPLEMENTADO: `cbcmodernwarfare:munitions_contraption`, registrado por `CBCModernWarfareEntityTypes.MUNITIONS_CONTRAPTION` como `MunitionsPhysicsContraptionEntity`. |
+| Tag radar PROJECTILE | IMPLEMENTADO: el recurso añade únicamente ese tipo a `create_radar:radar_projectile`, con `replace:false`. |
+| Inclusión en barrido físico | CONDICIONADO: Radars consulta `AbstractContraptionEntity` cuando `scanContraptions` está activo. CMI exige además que el filtro `scanProjectiles` esté activo antes de aceptar tracks para CIWS. Rango, FOV y cadencia nativos no se alteran. |
+| UUID del track | IMPLEMENTADO: `RadarTrack(Entity)` guarda el UUID real de la entidad en formato canónico (`UUID.toString()`); CMI vuelve a resolver esa misma entidad en el `ServerLevel`. |
+| Velocidad | CONDICIONADO: el misil publica su movimiento físico actual mediante `setContraptionMotion`/`getDeltaMovement`; el solver usa esa velocidad como snapshot lineal. Thrust y guiado pueden cambiarla durante el vuelo, así que no se garantiza una intercepción de un blanco maniobrante. |
+| AABB | CONDICIONADO: Warium deriva los límites de los bloques de la contraption, añade su margen nativo y Create usa esos límites para la caja de la entidad. CMI reutiliza la caja real del entity contact; no inventa dimensiones. |
+| Ownership/provenance | IMPLEMENTADO CONDICIONADO A OWNER CONOCIDO: `ShotOwnershipMixin` envuelve el `fireShot` real del lanzador y `EntityJoinLevelEvent` copia owner/IFF/platform desde ese contexto. Owner ausente conserva UNKNOWN y no habilita fuego. |
+| IFF y selección CIWS | IMPLEMENTADO EN CÓDIGO: se mantiene la ruta de 2G (`PROJECTILE` → UUID → entity viva → contacto actual → owner/IFF ENEMY → `canEngage` → aproximación, lock, solver y trayectoria segura). |
+| Colisión/neutralización | CONDICIONADO: el CBC projectile gestionado solo neutraliza en `canHitEntity/onHitEntity` después de una colisión física y revalidación IFF. El solver por sí solo nunca descarta el misil. Pendiente confirmar la colisión efectiva en juego. |
+| Compatibilidad WORLD 2F/2G y Sable 2H | Sin cambios de arquitectura; Sable embarcado sigue bloqueado como antes. |
+
+Validación estática del ciclo: `clean build --offline` y las 12 regresiones JavaExec pasaron. Pasaron los 11 verificadores anteriores más `Verify-MultiblockMissileRadar.ps1` (12 en total). `git diff --check` pasó. El artefacto compilado tuvo SHA-256 `8AD901B6C5986E13C1BE455795C45DC9346CDD22FB2E9987D40D8AF52A443134`.
+
+Detalle de filtros de Radars 0.4.9.4: el misil no hereda `Projectile`, por lo que su **consulta física** entra por `scanContraptions`. El tag cambia la clasificación posterior a PROJECTILE antes del fallback CONTRAPTION. El barrido nativo no filtra de nuevo cada entidad con `allowCategory` después de la consulta; para no dejar que esa diferencia de categorías autorice un tiro, CMI lee ambos flags y falla cerrado si `scanContraptions` o `scanProjectiles` están apagados. El radar conserva intactos sus filtros y parámetros.

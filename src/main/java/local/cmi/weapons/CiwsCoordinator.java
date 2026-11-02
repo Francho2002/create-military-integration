@@ -1,6 +1,7 @@
 package local.cmi.weapons;
 
 import com.happysg.radar.block.radar.behavior.IRadar;
+import com.happysg.radar.block.radar.behavior.RadarScanningBlockBehavior;
 import com.happysg.radar.block.radar.bearing.RadarBearingBlockEntity;
 import com.happysg.radar.block.radar.plane.StationaryRadarBlockEntity;
 import com.happysg.radar.block.radar.track.RadarTrack;
@@ -23,12 +24,14 @@ import local.cmi.core.MountedBlockReference;
 import local.cmi.core.Relation;
 import local.cmi.core.TargetId;
 import local.cmi.core.TrajectorySafety;
+import local.cmi.mixin.weapons.RadarScanningFilterAccess;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.AABB;
@@ -274,6 +277,11 @@ public final class CiwsCoordinator {
         List<RadarTrack> tracks = new ArrayList<>();
         try {
             if (!running(radar)) return null;
+            if (!(radar instanceof SmartBlockEntity smart)) return null;
+            RadarScanningBlockBehavior scanning = smart.getBehaviour(RadarScanningBlockBehavior.TYPE);
+            if (scanning == null) return null;
+            RadarScanningFilterAccess filters = (RadarScanningFilterAccess)(Object)scanning;
+            if (!filters.cmi$scanContraptions() || !filters.cmi$scanProjectiles()) return null;
             var snapshot = radar.getTracks();
             if (snapshot == null) return null;
             int scanned = 0;

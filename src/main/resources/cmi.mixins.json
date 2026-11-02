@@ -9,6 +9,7 @@
     "weapons.RotaryMaterialAccess",
     "weapons.ProjectileBallisticsAccess",
     "weapons.WariumCannonAccess",
+    "weapons.RadarScanningFilterAccess",
     "weapons.LauncherMaterialAccess",
     "weapons.StandardLauncherTickMixin",
     "weapons.CannonProbeNeoMixin",
