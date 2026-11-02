@@ -72,6 +72,11 @@ public final class CiwsCoordinator {
                         CiwsMotionTracker.History motionHistory, CiwsMotionPolicy.Assessment motionAssessment) {
         CiwsPolicy.Candidate candidate() { return new CiwsPolicy.Candidate(contact.id().uuid(), scannedAt, closestTime, distanceSquared); }
     }
+    private record PlanInput(MilitaryContact contact, Entity target, long scannedAt, double closestTime,
+                             double distanceSquared, double tolerance, CiwsMotionTracker.History motionHistory,
+                             CiwsMotionPolicy.Assessment motionAssessment) {
+        CiwsPolicy.Candidate candidate() { return new CiwsPolicy.Candidate(contact.id().uuid(), scannedAt, closestTime, distanceSquared); }
+    }
 
     private CiwsCoordinator() {}
 
@@ -225,9 +230,9 @@ public final class CiwsCoordinator {
             mount.setChanged();
         }
         UUID deferred = deferredTarget(data, now);
-        List<Plan> plans = plans(level, mount, cannon, actor, binding.radar(), shell, aim, pivot, now, deferred);
-        if (plans == null || plans.isEmpty()) { clearLock(level, mount); return; }
         UUID oldTarget = data.hasUUID(TARGET) ? data.getUUID(TARGET) : null;
+        List<Plan> plans = plans(level, mount, cannon, actor, binding.radar(), shell, aim, pivot, now, deferred, oldTarget);
+        if (plans == null || plans.isEmpty()) { clearLock(level, mount); return; }
         UUID identity = reservationIdentity(level, mount);
         CiwsPolicy.Candidate selected = null;
         Plan plan = null;
@@ -303,7 +308,7 @@ public final class CiwsCoordinator {
     private static List<Plan> plans(ServerLevel level, CompactCannonMountBlockEntity mount,
             PitchOrientedContraptionEntity cannon, Actor actor, IRadar radar,
             com.mrvew.firecontrol.ballistics.ShellModel shell, CannonProbe.Aim aim, Vec3 pivot, long now,
-            UUID deferredTarget) {
+            UUID deferredTarget, UUID currentTarget) {
         RadarSnapshot radarSnapshot = projectileTracks(radar);
         if (radarSnapshot == null) {
             MOTION.clearMount(level.dimension().location().toString(), mount.getBlockPos().asLong());
@@ -314,10 +319,9 @@ public final class CiwsCoordinator {
             MOTION.clearMount(level.dimension().location().toString(), mount.getBlockPos().asLong());
             return null;
         }
-        List<Plan> result = new ArrayList<>();
+        List<PlanInput> eligible = new ArrayList<>();
         Set<UUID> authorizedTracks = new HashSet<>();
         Set<UUID> solvedTracks = new HashSet<>();
-        int eligible = 0;
         for (RadarTrack track : radarSnapshot.tracks()) {
             UUID id = CiwsPolicy.projectileId(track.trackCategory() == TrackCategory.PROJECTILE, track.id(), now, track.scannedTime());
             if (id == null || !finite(track.position()) || !finite(track.velocity())) continue;
@@ -355,7 +359,25 @@ public final class CiwsCoordinator {
             var box = contact.bounds();
             double tolerance = CiwsPolicy.tolerance(box.getXsize(), box.getYsize(), box.getZsize());
             if (!Double.isFinite(closest) || !Double.isFinite(distance) || !Double.isFinite(tolerance)) continue;
-            if (!CiwsPolicy.withinBudget(++eligible, MAX_CANDIDATES)) { MOTION.clearMount(observer.dimension(), observer.mountPosition()); return null; }
+            eligible.add(new PlanInput(contact, target, track.scannedTime(), closest, distance, tolerance,
+                    motionHistory, motionAssessment));
+        }
+        MOTION.retain(observer, authorizedTracks);
+
+        // Rank every fully authorized, finite candidate before invoking the comparatively expensive
+        // firing solver. A busy radar must not erase the first eight safe plans when it has a ninth.
+        List<CiwsPolicy.Candidate> selected = CiwsCoordinationPolicy.orderedCandidates(currentTarget,
+                eligible.stream().map(PlanInput::candidate).toList(), deferredTarget, MAX_CANDIDATES);
+        List<Plan> result = new ArrayList<>(selected.size());
+        for (CiwsPolicy.Candidate candidate : selected) {
+            PlanInput input = eligible.stream().filter(value -> value.candidate().equals(candidate)).findFirst().orElse(null);
+            if (input == null) continue;
+            MilitaryContact contact = input.contact();
+            Entity target = input.target();
+            double tolerance = input.tolerance();
+            CiwsMotionPolicy.Assessment motionAssessment = input.motionAssessment();
+            Vec3 velocity = contact.velocity();
+            if (!finite(velocity)) continue;
             V3 targetAcceleration = motionAssessment == null ? V3.ZERO : motionAssessment.acceleration();
             TargetMotion motion = new TargetMotion(Ships.v3(contact.position()), Ships.v3(velocity), targetAcceleration);
             FiringSolver solver = new FiringSolver(shell, aim.pivot(), V3.ZERO, motion, 0, shell.lifetimeTicks());
@@ -367,9 +389,9 @@ public final class CiwsCoordinator {
             if (!CiwsPolicy.acceptableSolution(true, inArc, solution.miss(), tolerance, solution.flightTicks(), shell.lifetimeTicks())) continue;
             // Do not monopolize a contact with a predicted corridor that cannot be authorized.
             if (!safePath(level, actor, cannon, target, pivot, solver, solution.direction(), shell.lifetimeTicks())) continue;
-            result.add(new Plan(contact, target, track.scannedTime(), closest, distance, tolerance, solver, solution, motionHistory, motionAssessment));
+            result.add(new Plan(contact, target, input.scannedAt(), input.closestTime(), input.distanceSquared(), tolerance,
+                    solver, solution, input.motionHistory(), motionAssessment));
         }
-        MOTION.retain(observer, authorizedTracks);
         return result;
     }
 

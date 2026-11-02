@@ -121,17 +121,51 @@ public final class CiwsCoordinationRegression {
         check(local.size() == 1 && local.get(0).id().equals(y) && local.stream().noneMatch(c -> c.id().equals(x)),
                 "K: another radar's unobserved target is not imported into this mount's candidates");
 
-        // L: bounded tracks, plans and projectile lifetime remain unchanged.
+        // L: a ninth eligible track no longer invalidates the eight safe plans already selected.
         List<CiwsPolicy.Candidate> many = new ArrayList<>();
-        for (int i = 0; i < 16; i++) many.add(candidate(id(200 + i), 40, 1 + i, i));
-        check(CiwsCoordinationPolicy.orderedCandidates(null, many, null, 8).size() == 8,
-                "L: deterministic selector respects the eight-candidate cap");
+        for (int i = 0; i < 128; i++) many.add(candidate(id(200 + i), 40, 1 + i, i));
+        for (int count : List.of(1, 8, 9, 16, 64, 128)) {
+            List<CiwsPolicy.Candidate> selected = CiwsCoordinationPolicy.orderedCandidates(null,
+                    many.subList(0, count), null, 8);
+            check(selected.size() == Math.min(8, count),
+                    "L: preselection retains min(8, track count) candidates for " + count + " tracks");
+        }
+        List<CiwsPolicy.Candidate> topEight = CiwsCoordinationPolicy.orderedCandidates(null, many, null, 8);
+        check(topEight.size() == 8 && topEight.get(0).id().equals(id(200)) && topEight.get(7).id().equals(id(207)),
+                "L: top eight are selected in increasing approach time and distance order");
+        check(topEight.equals(CiwsCoordinationPolicy.orderedCandidates(null, many.reversed(), null, 8)),
+                "L: top eight ordering is independent of radar snapshot order");
+        List<CiwsPolicy.Candidate> ninthSafe = CiwsCoordinationPolicy.orderedCandidates(null, many.subList(0, 9), null, 8);
+        check(ninthSafe.size() == 8 && ninthSafe.stream().noneMatch(c -> c.id().equals(id(208))),
+                "L: ninth candidate is dropped without discarding the first eight safe candidates");
+        List<CiwsPolicy.Candidate> withCurrent = CiwsCoordinationPolicy.orderedCandidates(id(207), many, null, 8);
+        check(withCurrent.get(0).id().equals(id(207)) && withCurrent.size() == 8,
+                "L: current target is retained only while it remains among eligible candidates");
+        List<CiwsPolicy.Candidate> currentOutsidePriority = new ArrayList<>(many.subList(0, 8));
+        currentOutsidePriority.add(candidate(id(208), 40, 100, 100));
+        List<CiwsPolicy.Candidate> retainedCurrent = CiwsCoordinationPolicy.orderedCandidates(id(208), currentOutsidePriority, null, 8);
+        check(retainedCurrent.size() == 8 && retainedCurrent.get(0).id().equals(id(208)) &&
+                retainedCurrent.stream().noneMatch(c -> c.id().equals(id(207))),
+                "L: an eligible current target is reserved within the eight solver slots");
+        List<CiwsPolicy.Candidate> withoutCurrent = CiwsCoordinationPolicy.orderedCandidates(id(999), many, null, 8);
+        check(withoutCurrent.stream().noneMatch(c -> c.id().equals(id(999))) && withoutCurrent.get(0).id().equals(id(200)),
+                "L: an ineligible current target is not retained");
+        List<CiwsPolicy.Candidate> authorized = new ArrayList<>();
+        if (eligible(shooter, id(301), Relation.FRIEND)) authorized.add(candidate(id(301), 40, 1, 1));
+        if (eligible(shooter, id(302), Relation.UNKNOWN)) authorized.add(candidate(id(302), 40, 1, 1));
+        authorized.add(candidate(id(303), 40, 1, 1));
+        check(authorized.size() == 1 && authorized.get(0).id().equals(id(303)),
+                "L: FRIEND and UNKNOWN never enter the preselection candidate set");
         String coordinator = Files.readString(Path.of("src/main/java/local/cmi/weapons/CiwsCoordinator.java"));
         check(coordinator.contains("MAX_TRACKS = 128, MAX_CANDIDATES = 8, MAX_FLIGHT_TICKS = 200"),
                 "L: physical-track and lifetime budgets remain 128/8/200");
         check(coordinator.contains("Set<UUID> solvedTracks = new HashSet<>()") &&
                 coordinator.contains("if (!solvedTracks.add(id)) continue;"),
                 "L: duplicate radar identities are discarded before motion/solver work");
+        check(coordinator.contains("CiwsCoordinationPolicy.orderedCandidates(currentTarget,") &&
+                coordinator.contains("for (CiwsPolicy.Candidate candidate : selected)") &&
+                !coordinator.contains("withinBudget(++eligible, MAX_CANDIDATES)"),
+                "L: solver loop is bounded by deterministic preselection, without fail-closed ninth-candidate overflow");
 
         System.out.println("OK: 12 multi-CIWS coordination scenarios; local radar, exclusive reservations, lock reset, timeout and fixed budgets");
     }
