@@ -68,10 +68,26 @@ public final class CiwsCoordinationRegression {
         check(!CiwsCoordinationPolicy.preparationExpired(now, now + 39) &&
                 CiwsCoordinationPolicy.preparationExpired(now, now + CiwsCoordinationPolicy.PREPARING_BUDGET_TICKS),
                 "G: preparation has a fixed 40-tick ceiling");
+        check(CiwsCoordinationPolicy.preparationExpired(Long.MAX_VALUE - 40, Long.MAX_VALUE),
+                "G: preparation expires exactly at the representable 40-tick boundary");
+        check(!CiwsCoordinationPolicy.preparationExpired(Long.MAX_VALUE - 39, Long.MAX_VALUE),
+                "G: preparation is not expired one tick before the 40-tick boundary near Long.MAX_VALUE");
+        check(CiwsCoordinationPolicy.preparationExpired(0, Long.MAX_VALUE),
+                "G: a maximum non-negative elapsed time expires without subtraction overflow");
+        check(CiwsCoordinationPolicy.preparationExpired(-1, 10) &&
+                CiwsCoordinationPolicy.preparationExpired(10, -1) &&
+                CiwsCoordinationPolicy.preparationExpired(10, 9),
+                "G: negative or backward preparation clocks fail closed");
         check(CiwsCoordinationPolicy.retryDeferred(x, CiwsCoordinationPolicy.retryUntil(now + 40), now + 49) &&
                 !CiwsCoordinationPolicy.retryDeferred(x, CiwsCoordinationPolicy.retryUntil(now + 40), now + 50) &&
                 CiwsCoordinationPolicy.orderedCandidates(null, List.of(candidate(x, 15, 1, 1)), x, 8).isEmpty(),
                 "G: timeout releases the target and defers only the same mount's immediate reacquisition");
+        check(CiwsCoordinationPolicy.retryDeferred(x, -1, now),
+                "G: a malformed negative retry deadline keeps the target deferred fail-closed");
+        check(CiwsCoordinationPolicy.retryUntil(Long.MAX_VALUE - 5) == Long.MAX_VALUE &&
+                CiwsCoordinationPolicy.retryDeferred(x, Long.MAX_VALUE, Long.MAX_VALUE - 1) &&
+                !CiwsCoordinationPolicy.retryDeferred(x, Long.MAX_VALUE, Long.MAX_VALUE),
+                "G: retry deadline saturates safely at Long.MAX_VALUE and expires at its boundary");
 
         // H: a valid in-flight reservation remains exclusive while another mount uses its alternative.
         var inFlight = new ReservationBook<TargetId>();
@@ -107,6 +123,9 @@ public final class CiwsCoordinationRegression {
         String coordinator = Files.readString(Path.of("src/main/java/local/cmi/weapons/CiwsCoordinator.java"));
         check(coordinator.contains("MAX_TRACKS = 128, MAX_CANDIDATES = 8, MAX_FLIGHT_TICKS = 200"),
                 "L: physical-track and lifetime budgets remain 128/8/200");
+        check(coordinator.contains("Set<UUID> solvedTracks = new HashSet<>()") &&
+                coordinator.contains("if (!solvedTracks.add(id)) continue;"),
+                "L: duplicate radar identities are discarded before motion/solver work");
 
         System.out.println("OK: 12 multi-CIWS coordination scenarios; local radar, exclusive reservations, lock reset, timeout and fixed budgets");
     }

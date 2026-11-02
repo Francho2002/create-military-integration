@@ -51,7 +51,7 @@ public final class CiwsCoordinationPolicy {
     }
 
     public static boolean retryDeferred(UUID target, long retryUntil, long now) {
-        return target != null && (now < 0 || now < retryUntil);
+        return target != null && (now < 0 || retryUntil < 0 || now < retryUntil);
     }
 
     public static long retryUntil(long now) {

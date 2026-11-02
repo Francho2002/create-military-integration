@@ -316,6 +316,7 @@ public final class CiwsCoordinator {
         }
         List<Plan> result = new ArrayList<>();
         Set<UUID> authorizedTracks = new HashSet<>();
+        Set<UUID> solvedTracks = new HashSet<>();
         int eligible = 0;
         for (RadarTrack track : radarSnapshot.tracks()) {
             UUID id = CiwsPolicy.projectileId(track.trackCategory() == TrackCategory.PROJECTILE, track.id(), now, track.scannedTime());
@@ -328,6 +329,9 @@ public final class CiwsCoordinator {
             boolean canEngage = CombatServices.canEngage(level, actor, contact);
             if (!CiwsPolicy.eligible(target.isAlive(), contact.projectile(), actor.owner(), contact.owner(),
                     actor.platform(), contact.platform(), relation, canEngage)) { MOTION.invalidate(observer, id); continue; }
+            // A physical radar snapshot can contain duplicate observations for one entity.
+            // Keep the first authorized track so duplicate IDs cannot consume solver budget.
+            if (!solvedTracks.add(id)) continue;
             authorizedTracks.add(id);
             CiwsMotionTracker.History motionHistory = null;
             CiwsMotionPolicy.Assessment motionAssessment = null;

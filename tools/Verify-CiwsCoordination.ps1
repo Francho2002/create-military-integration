@@ -1,6 +1,8 @@
 param(
     [Parameter(Mandatory)][string]$CBC,
     [Parameter(Mandatory)][string]$NeoWarfare,
+    [string]$ModpackDir,
+    [string]$CandidatesDir,
     [string]$Artifact = "$PSScriptRoot/../build/libs/create-military-integration-0.1.0-dev.jar"
 )
 $ErrorActionPreference = 'Stop'
@@ -8,6 +10,14 @@ $repo = (Resolve-Path "$PSScriptRoot/..").Path
 function Require([bool]$condition, [string]$message) { if (!$condition) { throw $message } }
 function Has([string]$text, [string]$term, [string]$description) {
     if (!$text.Contains($term)) { throw "Missing $description : $term" }
+}
+function Ordered([string]$text, [string[]]$terms, [string]$description) {
+    $last = -1
+    foreach ($term in $terms) {
+        $pos = $text.IndexOf($term, $last + 1, [StringComparison]::Ordinal)
+        if ($pos -lt 0) { throw "Changed $description : expected $term in order" }
+        $last = $pos
+    }
 }
 function SourceSection([string]$source, [string]$signature) {
     $start = $source.IndexOf($signature, [StringComparison]::Ordinal)
@@ -47,6 +57,32 @@ function HasVoidFireShot([string]$jar, [string]$type) {
     return $listing
 }
 
+$pins = @{}
+Get-Content -LiteralPath (Join-Path $repo 'dependency-hashes.properties') | ForEach-Object {
+    if ($_ -match '^([^#=]+)=([0-9A-Fa-f]{64})$') { $pins[$Matches[1]] = $Matches[2].ToUpperInvariant() }
+    elseif (-not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^\s*#') { throw "Malformed dependency pin: $_" }
+}
+$expectedNames = @('create-1.21.1-6.0.10.jar', 'sable-neoforge-1.21.1-2.0.6.jar',
+    'createbigcannons-5.11.7+mc.1.21.1.jar', 'cbcmodernwarfare-0.0.6v+mc.1.21.1-neoforge.jar',
+    'cbcwariumce-1.2.0.jar', 'wariumce-1.0.4.jar', 'create-radars-0.4.9.4.jar',
+    'create-better-targeting-1.0.0.1.jar', 'ftb-teams-neoforge-2101.1.11.jar',
+    'ftb-chunks-neoforge-2101.1.22.jar', 'minecolonies-1.1.1403-1.21.1.jar')
+Require ($pins.Count -eq $expectedNames.Count) 'Pinned dependency set changed; review this verifier deliberately.'
+foreach ($name in $expectedNames) { Require ($pins.ContainsKey($name)) "Missing fixed SHA-256 pin: $name" }
+if ([bool]$ModpackDir -xor [bool]$CandidatesDir) { throw 'Supply both -ModpackDir and -CandidatesDir, or neither.' }
+if ($ModpackDir -and $CandidatesDir) {
+    foreach ($name in $expectedNames) {
+        $folder = if ($name -in @('create-radars-0.4.9.4.jar', 'create-better-targeting-1.0.0.1.jar')) { $CandidatesDir } else { $ModpackDir }
+        $jarPath = Join-Path $folder $name
+        Require (Test-Path -LiteralPath $jarPath) "Missing pinned dependency JAR: $jarPath"
+        $actual = (Get-FileHash -LiteralPath $jarPath -Algorithm SHA256).Hash.ToUpperInvariant()
+        Require ($actual -eq $pins[$name]) "Dependency SHA-256 mismatch for $name : $actual"
+    }
+    $dependencyEvidence = 'local bytes for all 11 pinned dependencies match their pins'
+} else {
+    $dependencyEvidence = '11 dependency pin records present; local JAR bytes not supplied'
+}
+
 RequireHash $CBC 'createbigcannons-5.11.7+mc.1.21.1.jar'
 RequireHash $NeoWarfare 'cbcmodernwarfare-0.0.6v+mc.1.21.1-neoforge.jar'
 Require (Test-Path -LiteralPath $Artifact) "Missing CMI artifact: $Artifact"
@@ -84,6 +120,11 @@ Has $policy 'thenComparingDouble(CiwsPolicy.Candidate::distanceSquared)' 'priori
 Has $policy 'candidate.id().toString()' 'UUID breaks equal-priority ties deterministically'
 Has $order 'candidate.id().equals(deferred)' 'temporarily ceded threat is skipped by that mount'
 Has $order 'ordered.size() == maximum' 'ordered candidate list obeys caller budget'
+Has $policy 'now - startedAt >= PREPARING_BUDGET_TICKS' 'elapsed preparation timeout uses guarded subtraction'
+Has $policy 'retryUntil < 0 || now < retryUntil' 'malformed retry deadline remains deferred fail-closed'
+Has $regression 'Long.MAX_VALUE - 40' 'preparation overflow regression at deadline'
+Has $regression 'Long.MAX_VALUE - 39' 'preparation regression one tick before deadline'
+Has $regression 'retryDeferred(x, -1, now)' 'negative retry deadline regression'
 
 # Shared reservations are owned by stable mount identity and can only be released by that owner.
 Has $reservation 'existing != null && !existing.owner().equals(owner)' 'ReservationBook rejects another mount without replacing its reservation'
@@ -114,6 +155,7 @@ foreach ($term in @('CombatServices.resolve', 'CombatServices.relation', 'Relati
 }
 Has $coordinator 'radar.getTracks()' 'candidate plans originate from this mount radar snapshot'
 Has $plans 'projectileTracks(radar)' 'plan builder receives only its explicitly linked radar tracks'
+Ordered $plans @('CiwsPolicy.eligible(', 'if (!solvedTracks.add(id)) continue;', 'authorizedTracks.add(id);', 'new FiringSolver(') 'duplicate physical tracks are dropped after authorization and before solver work'
 Has $safePath 'TrajectorySafety.clear(' 'trajectory safety remains in the final corridor check'
 Has $clearLock 'release(level, mount, data.getUUID(RESERVED))' 'lock cleanup releases only an owned preliminary reservation'
 Has $clearLock 'data.remove(PREPARING_TARGET); data.remove(PREPARING_SINCE)' 'lock cleanup cancels preparation metadata'
@@ -137,10 +179,10 @@ $artifactPolicy = Listing $Artifact 'local.cmi.weapons.CiwsCoordinationPolicy'
 $artifactReservation = Listing $Artifact 'local.cmi.core.ReservationBook'
 foreach ($term in @('CiwsCoordinationPolicy.orderedCandidates', 'CiwsCoordinationPolicy.preparationExpired',
         'CiwsCoordinationPolicy.retryUntil', 'CombatServices.reserve', 'CiwsPolicy.observe', 'TrajectorySafety.clear',
-        'WeaponAdapters.fire')) { Has $artifactCoordinator $term 'compiled local multi-CIWS decision path' }
+        'WeaponAdapters.fire', 'java/util/Set.add')) { Has $artifactCoordinator $term 'compiled local multi-CIWS decision path' }
 foreach ($term in @('orderedCandidates', 'PREPARING_BUDGET_TICKS', 'RETRY_COOLDOWN_TICKS', 'PREPARING_RESERVATION_TTL_TICKS')) {
     Has $artifactPolicy $term 'compiled bounded coordination policy'
 }
 foreach ($term in @('reserve', 'release', 'java/util/Map.remove')) { Has $artifactReservation $term 'compiled owner-exclusive reservation book' }
 
-'OK: radar-local fallback, deterministic order, bounded PREPARING handoff, protected flight holds, IFF/safety gates, native fire contract and compiled artifact verified. Static only; no runtime executed.'
+"OK: radar-local fallback, deterministic order, bounded PREPARING handoff, protected flight holds, IFF/safety gates, native fire contract, compiled artifact and overflow boundaries verified; $dependencyEvidence. Static only; no runtime executed."

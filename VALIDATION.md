@@ -337,12 +337,22 @@ SHA-256 de `build/libs/create-military-integration-0.1.0-dev.jar`: `7913F56F1001
 
 No se ejecutaron Minecraft, cliente, servidor ni GameTest; no se copiaron JARs instalados. Las integraciones de predicción y disparo siguen sin acreditación runtime.
 
-## Ciclo 2K — coordinación entre CIWS
+## Ciclo 2K — reconciliación de implementaciones
 
-La nueva `ciwsCoordinationRegression` incluye 12 escenarios A–L: fallback X→Y, exclusividad con una amenaza, tres monturas/dos amenazas, expiración, pérdida de ownership, reset de lock al cambiar UUID, falta de solución y timeout de preparación, protección de una reserva IN_FLIGHT ante cambio de prioridad, timestamp repetido, IFF, aislamiento entre radares y límite de candidatos. La regresión de coordinación pasa en `clean build --offline`; el build ejecutó **14 suites Java** (13 existentes + la suite nueva).
+### Comparación de árboles
 
-La API CBC 5.11.7 fijada declara `fireShot(ServerLevel, PitchOrientedContraptionEntity): void`. `WeaponAdapters.fire` retorna `true` después de que esa llamada retorne normalmente, pero su propio contrato advierte que el cannon puede rechazar el disparo. Por ello, el hold post-request sigue siendo conservador y no acredita generación de proyectil ni intercepción.
+- `origin/main`: `9018a3254af8039248e56b9ebe15924eaf3f3e91`; integración aislada: `cf2d646b2c1b61af3243a125c8c19106ce3d7614`; base común: `54a26134df3f6ab71a8fc8180b51d03118641a6a`.
+- La implementación de coordinación ya existente en `main` incluía fallback entre planes locales, prioridad determinista, reservas exclusivas, lock separado por UUID, timeout/defer PREPARING, protección IN_FLIGHT, fail-closed ante reloj negativo y metadatos PREPARING explícitos validados. Esas rutas se conservaron; no se fusionaron dos coordinadores duplicados.
+- La única optimización de producción exclusiva útil de `cf2d646` fue deduplicar UUID repetidos del snapshot antes de actualizar historial/resolver solver; se incorporó mediante `solvedTracks`. También se incorporó el rechazo fail-closed de un `retryUntil` negativo/malformado.
+- La integración aislada reemplazaba metadatos PREPARING explícitos por inferencia desde `TARGET`, quitaba la salida fail-closed `now < 0`, dejaba el lock/reserva hasta timeout en algunas salidas de seguridad y no limpiaba PREPARING de la misma manera después de dispatch. Se conservó `main` en estos puntos.
+- El guard aislado `startedAt > Long.MAX_VALUE - 40` era incorrecto: con `startedAt = Long.MAX_VALUE - 39` y `now = Long.MAX_VALUE` la edad es 39 ticks, por lo que debe seguir sin expirar. La implementación base valida `0 <= startedAt <= now` y luego compara `now - startedAt >= 40`; esa resta no puede desbordarse bajo esas precondiciones. La prueba de overflow ahora verifica la igualdad en 40 y el caso de 39.
+- La regresión base usa `ReservationBook<TargetId>` y ejercita A–L sobre el contrato real. Se mantuvo; no se adoptó la versión reflexiva de `cf2d646`, que usa `ReservationBook<UUID>` y pierde parte de esa cobertura de tipo.
+- Se mantuvo el verificador `main`, que inspecciona firmas `javap`, contrato nativo CBC, `ReservationBook`, fuente y bytecode empaquetado. Se añadieron comprobaciones de hash para los 11 JAR fijados y guards de deadline/track duplicado; no se sustituyó por la versión aislada, que omitía varias comprobaciones compiladas y de descriptor.
 
-Los 13 verificadores previos y `Verify-CiwsCoordination.ps1` (14 en total) aprobaron. También aprobó `git diff --check`. SHA-256 de `build/libs/create-military-integration-0.1.0-dev.jar`: `12A264A09AF86BE455538CE3C849D9DF1B9377437AFFD9F0561F56819CAABE20`.
+### Validación reconciliada
 
-Sin Minecraft, servidor, GameTest ni despliegues; el funcionamiento y el reparto real de fuego entre varias monturas permanecen **PENDIENTES DE VALIDACIÓN EN JUEGO**.
+- `clean build --offline`: **BUILD SUCCESSFUL** con Java 21 y pins actuales.
+- **14 suites Java** aprobaron: `guidanceModeRegression`, `managedGuidanceNbtRegression`, `geometryIntersectionRegression`, `radarSpearModeRegression`, `radarSpearImpactRegression`, `radarSpearStructuralRegression`, `radarSpearBlastGeometryRegression`, `shotContextRegression`, `shipOwnershipRegression`, `radarSpearLockRegression`, `ciwsPolicyRegression`, `mountedBlockReferenceRegression`, `ciwsMotionRegression` y `ciwsCoordinationRegression`. La suite 2K conserva A–L y añade límites exactos de overflow y deadline inválido.
+- **14 verificadores** aprobaron: `Verify-Artifact.ps1`, `Verify-CIWS.ps1`, `Verify-CiwsCoordination.ps1`, `Verify-CIWSMotionPrediction.ps1`, `Verify-Geometry.ps1`, `Verify-GuidanceBytecode.ps1`, `Verify-MixinTargets.ps1`, `Verify-MultiblockMissileRadar.ps1`, `Verify-RadarAutomation.ps1`, `Verify-RadarSpearArea.ps1`, `Verify-RadarSpearArrowCollision.ps1`, `Verify-RadarSpearBytecode.ps1`, `Verify-SableBytecode.ps1` y `Verify-SableMountedSystems.ps1`. El verificador de coordinación confirmó localmente los hashes de los 11 JAR fijados y el bytecode del JAR de CMI.
+- `git diff --check`: aprobado. SHA-256 de `build/libs/create-military-integration-0.1.0-dev.jar`: `18C3705D6A8F8F09E45C1887B625CA7DAFF1C1CFF3B3C0157640989BD7ABD938`.
+- No se inició Minecraft, cliente, servidor ni GameTest. No se modificó KxCraft, no se copiaron JAR instalados y no se publicó a `main` ni release. La distribución física entre varias monturas continúa **PENDIENTE DE VALIDACIÓN EN JUEGO**.
