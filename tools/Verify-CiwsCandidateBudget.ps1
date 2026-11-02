@@ -36,6 +36,20 @@ function Before([string]$Text, [string]$First, [string]$Second) {
     $b = $Text.IndexOf($Second, [StringComparison]::Ordinal)
     return $a -ge 0 -and $b -ge 0 -and $a -lt $b
 }
+function BlockAfter([string]$Text, [int]$Index) {
+    if ($Index -lt 0) { return $null }
+    $open = $Text.IndexOf('{', $Index)
+    if ($open -lt 0) { return $null }
+    $depth = 0
+    for ($i = $open; $i -lt $Text.Length; $i++) {
+        if ($Text[$i] -eq '{') { $depth++ }
+        elseif ($Text[$i] -eq '}') {
+            $depth--
+            if ($depth -eq 0) { return $Text.Substring($open + 1, $i - $open - 1) }
+        }
+    }
+    return $null
+}
 function Listing([string]$Jar, [string]$Type) {
     $lines = & javap -p -c -classpath $Jar $Type 2>&1
     if ($LASTEXITCODE -ne 0) { throw "javap failed for $Type : $($lines -join "`n")" }
@@ -78,7 +92,9 @@ Check ($priority.Success) 'candidate priority is deterministic: TTC ascending, d
 Check ($selector -and $selector.Contains('unique.merge') -and $selector.Contains('current == null ? null : unique.remove(current)')) 'prior target is retained only if present in the already eligible unique candidate set'
 Check ($selector -and $selector.Contains('ordered.size() == maximum') -and $selector.Contains('List.copyOf(ordered)')) 'candidate selector bounds result size without mutating caller state'
 Check ($plans -and (Before $plans 'CiwsCoordinationPolicy.orderedCandidates' 'new FiringSolver(')) 'eligible candidates are capped and ordered before any solver construction'
-Check ($plans -and !$plans.Contains('withinBudget(++eligible, MAX_CANDIDATES)') -and !$plans.Contains('MOTION.clearMount(observer.dimension(), observer.mountPosition())')) 'a ninth legitimate pre-solver candidate cannot abort prior candidates or clear lock/motion due to saturation'
+$saturationGuard = if ($plans) { $plans.IndexOf('withinBudget(++eligible, MAX_CANDIDATES)', [StringComparison]::Ordinal) } else { -1 }
+$saturationBody = BlockAfter $plans $saturationGuard
+Check ($saturationGuard -lt 0 -or ($saturationBody -and !$saturationBody.Contains('return null') -and !$saturationBody.Contains('MOTION.clearMount'))) 'a ninth legitimate pre-solver candidate cannot abort prior candidates or clear lock/motion due to saturation; unrelated fail-closed cleanup remains allowed'
 Check ($plans -and $plans.Contains('MAX_CANDIDATES') -and $plans.Contains('orderedCandidates')) 'solver workload is drawn from the capped candidate set (at most eight solve attempts)'
 Check ($regression.Contains('2L:') -and ($regression -match '(?i)ninth|saturat|overflow|pre.?solver')) 'regression source includes an explicit 2L overflow/saturation case'
 Check ($regression -match '(?i)2L:.*(?:old|current|previous).*eligible|(?:old|current|previous).*eligible.*2L:' -and $regression.Contains('orderedCandidates')) 'regression source covers retaining a previous target only while it remains eligible'
