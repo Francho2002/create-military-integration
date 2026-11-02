@@ -96,8 +96,8 @@ $saturationGuard = if ($plans) { $plans.IndexOf('withinBudget(++eligible, MAX_CA
 $saturationBody = BlockAfter $plans $saturationGuard
 Check ($saturationGuard -lt 0 -or ($saturationBody -and !$saturationBody.Contains('return null') -and !$saturationBody.Contains('MOTION.clearMount'))) 'a ninth legitimate pre-solver candidate cannot abort prior candidates or clear lock/motion due to saturation; unrelated fail-closed cleanup remains allowed'
 Check ($plans -and $plans.Contains('MAX_CANDIDATES') -and $plans.Contains('orderedCandidates')) 'solver workload is drawn from the capped candidate set (at most eight solve attempts)'
-Check ($regression.Contains('2L:') -and ($regression -match '(?i)ninth|saturat|overflow|pre.?solver')) 'regression source includes an explicit 2L overflow/saturation case'
-Check ($regression -match '(?i)2L:.*(?:old|current|previous).*eligible|(?:old|current|previous).*eligible.*2L:' -and $regression.Contains('orderedCandidates')) 'regression source covers retaining a previous target only while it remains eligible'
+Check ($regression.Contains('ninth candidate is dropped') -and $regression.Contains('solver loop is bounded by deterministic preselection')) 'regression source covers ninth-candidate saturation and bounded solver work'
+Check ($regression.Contains('current target is retained only while it remains among eligible candidates') -and $regression.Contains('an ineligible current target is not retained')) 'regression source covers retaining a previous target only while it remains eligible'
 
 # Artifact checks run when a built candidate jar exists; a missing artifact is reported as a static-only limit.
 if (Test-Path -LiteralPath $Artifact -PathType Leaf) {
