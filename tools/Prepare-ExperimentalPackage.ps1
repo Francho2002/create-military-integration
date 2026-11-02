@@ -6,8 +6,11 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$artifactPath = (Resolve-Path -LiteralPath $Artifact -PathType Leaf).Path
-$sourcePath = (Resolve-Path -LiteralPath $Sources -PathType Leaf).Path
+if (!(Test-Path -LiteralPath $Artifact -PathType Leaf) -or !(Test-Path -LiteralPath $Sources -PathType Leaf)) {
+    throw 'Both the binary artifact and source archive must exist as files.'
+}
+$artifactPath = (Resolve-Path -LiteralPath $Artifact).Path
+$sourcePath = (Resolve-Path -LiteralPath $Sources).Path
 $branch = (& git -C $repo rev-parse --abbrev-ref HEAD).Trim()
 $commit = (& git -C $repo rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or !$commit -or $branch -eq 'main') { throw 'Package preparation requires a committed review branch, not main.' }
