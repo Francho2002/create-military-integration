@@ -98,10 +98,19 @@ $refs = Get-Content -Raw -LiteralPath (Join-Path $root 'src/main/java/local/cmi/
 foreach ($term in @('Space.WORLD', 'Space.SABLE', 'ResourceKey.create', 'level.hasChunkAt(position)', 'container.getSubLevel(shipUuid)',
         'ship.isRemoved()', 'plot.toGlobal(localChunk)', 'plot.getChunk(localChunk)', 'chunk.getBlockEntity(storedPosition)',
         'ship.logicalPose()', 'blockData.contains("cmiOwner")', 'sableActor(shipUuid, ship, resolved.get().blockEntity().getPersistentData())',
-        'CmiData.get(resolved.get().level()).ship(shipUuid)', 'CombatServices.actor')) {
+        'CmiData.get(resolved.get().level()).ship(shipUuid)', 'CombatServices.actor',
+        'record Resolved(ServerLevel level, BlockPos requestedPosition, BlockPos storedPosition,',
+        'Vec3.atCenterOf(storedPlotPosition)', 'new Resolved(level, position, storedPosition, blockEntity, shipUuid, worldCenter)')) {
     Has $refs $term 'mounted-reference space/lookup/ownership/pose guard'
 }
-Has $refs 'worldCenter(ship.logicalPose(), position)' 'live Sable pose transform on each resolution'
+$resolveStart = $refs.IndexOf('private Optional<Resolved> resolveSable(', [StringComparison]::Ordinal)
+$resolveEnd = $refs.IndexOf('private static boolean validBlockEntity(', $resolveStart, [StringComparison]::Ordinal)
+if ($resolveStart -lt 0 -or $resolveEnd -lt 0) { throw 'Cannot isolate MountedBlockReference.resolveSable()' }
+$resolveSable = $refs.Substring($resolveStart, $resolveEnd - $resolveStart)
+HasPattern $resolveSable 'BlockPos storedPosition\s*=\s*storedPlotPosition\(plot,\s*position,[\s\S]*?worldCenterFromStoredPlotPosition\(ship\.logicalPose\(\),\s*storedPosition\)' 'local reference translated before pose-to-world transform'
+if ($resolveSable -match 'worldCenterFromStoredPlotPosition\(ship\.logicalPose\(\),\s*(?:position|requestedPosition)\)') {
+    throw 'resolveSable must not transform the CMI-local requested position'
+}
 
 $automation = Get-Content -Raw -LiteralPath (Join-Path $root 'src/main/java/local/cmi/missiles/RadarSpearAutomation.java')
 $ciws = Get-Content -Raw -LiteralPath (Join-Path $root 'src/main/java/local/cmi/weapons/CiwsCoordinator.java')
@@ -143,7 +152,7 @@ foreach ($forbidden in @('MissileHardpointFireProcedure.execute(', 'BlockWeaponR
 }
 
 $artifactListing = Listing $Artifact 'local.cmi.core.MountedBlockReference'
-foreach ($method in @('resolve', 'actor', 'sableActor', 'worldCenter', 'storedPlotPosition', 'load', 'save')) {
+foreach ($method in @('resolve', 'actor', 'sableActor', 'worldCenterFromStoredPlotPosition', 'storedPlotPosition', 'load', 'save')) {
     if ($artifactListing -notmatch ('\b' + [regex]::Escape($method) + '\(')) { throw "MountedBlockReference method absent from artifact: $method" }
 }
 'OK: pinned Sable plot lookup and tick restrictions, current-pose transforms, Warium ServerLevel-gated hardpoint branch and Level spawn signature, typed fail-closed references/ownership and non-executable mounted commands. Static inspection only; no runtime tick, mixin, radar, aiming or projectile spawn was executed.'

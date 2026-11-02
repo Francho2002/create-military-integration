@@ -101,10 +101,10 @@ public record MountedBlockReference(Space space, ResourceLocation dimension, UUI
         return ship != null && ship.owner() != null && blockData.hasUUID("cmiOwner") && ship.owner().equals(blockData.getUUID("cmiOwner"));
     }
 
-    /** Uses the ship's live pose for every lookup; cached world coordinates are intentionally not stored. */
-    public static Vec3 worldCenter(Pose3dc pose, BlockPos localPosition) {
-        if (pose == null || localPosition == null) return null;
-        Vec3 center = pose.transformPosition(Vec3.atCenterOf(localPosition));
+    /** Transforms the center of a stored plot block through the ship's live pose; CMI-local coordinates must be translated first. */
+    public static Vec3 worldCenterFromStoredPlotPosition(Pose3dc pose, BlockPos storedPlotPosition) {
+        if (pose == null || storedPlotPosition == null) return null;
+        Vec3 center = pose.transformPosition(Vec3.atCenterOf(storedPlotPosition));
         return finite(center) ? center : null;
     }
 
@@ -149,7 +149,7 @@ public record MountedBlockReference(Space space, ResourceLocation dimension, UUI
         if (chunk == null || chunk.getLevel() != level || !storedPosition.equals(chunk.getPos().getBlockAt(position.getX() & 15, position.getY(), position.getZ() & 15)))
             return Optional.empty();
         BlockEntity blockEntity = chunk.getBlockEntity(storedPosition);
-        Vec3 worldCenter = worldCenter(ship.logicalPose(), position);
+        Vec3 worldCenter = worldCenterFromStoredPlotPosition(ship.logicalPose(), storedPosition);
         return validBlockEntity(level, storedPosition, blockEntity) && worldCenter != null
                 ? Optional.of(new Resolved(level, position, storedPosition, blockEntity, shipUuid, worldCenter)) : Optional.empty();
     }

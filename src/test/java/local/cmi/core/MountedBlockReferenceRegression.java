@@ -8,6 +8,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.phys.Vec3;
 
 public final class MountedBlockReferenceRegression {
     private MountedBlockReferenceRegression() {}
@@ -64,12 +65,29 @@ public final class MountedBlockReferenceRegression {
         check(MountedBlockReference.storedBlockPosition(local, new ChunkPos(Integer.MAX_VALUE, 0), -64, 320) == null,
                 "overflowing stored coordinate rejected");
 
-        Pose3d firstPose = new Pose3d(new Vector3d(0, 0, 0), new Quaterniond().identity(), new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
-        var firstWorldCenter = MountedBlockReference.worldCenter(firstPose, local);
-        firstPose.position().set(10, 0, 0);
-        var movedWorldCenter = MountedBlockReference.worldCenter(firstPose, local);
-        check(firstWorldCenter != null && movedWorldCenter != null && movedWorldCenter.x - firstWorldCenter.x == 10.0,
-                "world center is recomputed from the changed live Sable pose");
+        check(new BlockPos(2065, 80, -798).equals(stored), "regression uses the distinct stored plot coordinate");
+        Quaterniond rotation = new Quaterniond().rotationY(0.61);
+        Pose3d firstPose = new Pose3d(new Vector3d(13.25, -7.5, 41.75), rotation,
+                new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        Vec3 storedCenter = Vec3.atCenterOf(stored);
+        Vec3 localCenter = Vec3.atCenterOf(local);
+        Vec3 expectedWorldCenter = firstPose.transformPosition(storedCenter);
+        Vec3 wronglyTransformedLocal = firstPose.transformPosition(localCenter);
+        Vec3 firstWorldCenter = MountedBlockReference.worldCenterFromStoredPlotPosition(firstPose, stored);
+        check(firstWorldCenter != null && firstWorldCenter.distanceToSqr(expectedWorldCenter) < 1.0e-12,
+                "logical pose transforms the stored plot block center");
+        check(firstWorldCenter.distanceToSqr(wronglyTransformedLocal) > 1_000_000.0,
+                "large plot offset is not hidden by transforming the CMI-local reference");
+        Vec3 roundTrippedPlotCenter = firstPose.transformPositionInverse(firstWorldCenter);
+        check(roundTrippedPlotCenter.distanceToSqr(storedCenter) < 1.0e-12,
+                "world-to-plot inverse returns to the stored plot frame");
+        check(roundTrippedPlotCenter.distanceToSqr(localCenter) > 1_000_000.0,
+                "world-to-plot inverse does not return to the CMI-local frame");
+
+        firstPose.position().add(10, 0, 0);
+        Vec3 movedWorldCenter = MountedBlockReference.worldCenterFromStoredPlotPosition(firstPose, stored);
+        check(movedWorldCenter != null && Math.abs((movedWorldCenter.x - firstWorldCenter.x) - 10.0) < 1.0e-9,
+                "world center uses the changed live Sable pose and stable stored plot position");
         System.out.println("MountedBlockReference regression checks passed");
     }
 
