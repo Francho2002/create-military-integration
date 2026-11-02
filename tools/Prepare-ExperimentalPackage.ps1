@@ -32,7 +32,8 @@ $zip = Join-Path $out "create-military-integration-$version-experimental-$short.
 if (Test-Path -LiteralPath $stage) { throw "Staging path already exists; refusing to overwrite: $stage" }
 if (Test-Path -LiteralPath $zip) { throw "Package already exists; refusing to overwrite: $zip" }
 $required = @('README.md','LICENSE','NOTICE','THIRD_PARTY.md',
-    'RELEASE_NOTES.md','COMPATIBILITY.md','KNOWN_LIMITATIONS.md','dependency-hashes.properties')
+    'RELEASE_NOTES.md','COMPATIBILITY.md','KNOWN_LIMITATIONS.md',
+    'IMPLEMENTATION_STATUS.md','VALIDATION.md','dependency-hashes.properties')
 foreach ($name in $required) { if (!(Test-Path -LiteralPath (Join-Path $repo $name) -PathType Leaf)) { throw "Missing package document: $name" } }
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
 foreach ($name in $required) { Copy-Item -LiteralPath (Join-Path $repo $name) -Destination (Join-Path $stage $name) }
@@ -67,7 +68,8 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $archive = [IO.Compression.ZipFile]::OpenRead($zip)
 try {
     $names = @($archive.Entries | ForEach-Object { $_.FullName })
-    foreach ($name in @('LICENSE','NOTICE','THIRD_PARTY.md','RELEASE_NOTES.md','COMPATIBILITY.md','KNOWN_LIMITATIONS.md','SHA256SUMS.txt','PROVENANCE.txt')) {
+    foreach ($name in @('LICENSE','NOTICE','THIRD_PARTY.md','RELEASE_NOTES.md','COMPATIBILITY.md',
+            'KNOWN_LIMITATIONS.md','IMPLEMENTATION_STATUS.md','VALIDATION.md','SHA256SUMS.txt','PROVENANCE.txt')) {
         if ($name -notin $names) { throw "Package archive is missing $name" }
     }
     $jars = @($names | Where-Object { $_ -like '*.jar' })
