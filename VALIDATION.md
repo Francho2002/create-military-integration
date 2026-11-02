@@ -1,5 +1,33 @@
 # Validación realizada
 
+## Ciclo 2H — referencias Sable y capacidades a bordo BLOQUEADAS
+
+### Inspección de bytecode (lectura estática)
+
+- Los JAR leídos por `javap` coinciden con `dependency-hashes.properties`: `sable-neoforge-1.21.1-2.0.6.jar` (`9C199157843BF953A47DFF625FC5BB41C01A90538D35AD18E6996BBCB8A617C2`) y `wariumce-1.0.4.jar` (`AA0DD2FA8B5C8C2B4FFF40B4FE2189D94BC9D07240F43A5E6AF95D109B39E27E`) del perfil `C:\Users\panch\Documents\MinecraftProfiles\NeoForge-1.21.1-Aeronautics\mods`; `create-radars-0.4.9.4.jar` (`4554359FEE389B1C255B4CEF23AC41E978B2A371CEC9E952185F4EC0A90EE930`) de `C:\Users\panch\OneDrive\Desktop\KxCraft\_descompiled\mods`.
+- Se leyeron firmas/cuerpos de `SubLevelContainer`, `ServerSubLevelContainer`, `SubLevel`, `LevelPlot`, `ServerLevelPlot`, `EmbeddedPlotLevelAccessor`, `Pose3dc`, `IRadar`, `RadarTrack`, `RadarScanningBlockBehavior`, `MissileHardpointFireProcedure` y `BlockWeaponRecoil`. La cadena Sable invoca `SubLevel.tick` y `LevelPlot.tick`; el método `ServerLevelPlot.tick` no invoca tick de block entities. El accessor de plot transforma posiciones de blocks con el centro del plot pero no extiende `Level`. La rama Radar Spear de Warium comprueba `instanceof ServerLevel`, y su inserción nativa acepta `Level` (recibiendo la instancia ServerLevel); el accessor de plot no satisface esa comprobación.
+- CBC/Neo Warfare comparten las rutas de montura y disparo verificadas por el `Verify-CIWS.ps1` existente; 2H no modifica `WeaponAdapters`, mixins de fire, balística, geometría, IFF ni reservas. Al no haber tick nativo de block entity en el plot, este ciclo no autoriza ni calcula aim/muzzle/fire a bordo.
+
+### Cambios estáticos
+
+- `MountedBlockReference` distingue `WORLD (dimension, BlockPos)` de `SABLE (dimension padre, ship UUID, plot-local BlockPos)`. La resolución no solicita chunks: exige el subnivel exacto y no retirado, el mismo parent `ServerLevel`, límites del plot, chunk disponible, BE exacto/no retirado y coincidencia de level/posición. Las coordenadas WORLD dentro de una parcela Sable fallan como ambiguas.
+- La coordenada mundial del centro se recalcula para cada lookup desde `logicalPose()` actual. La propiedad se cubre con regresión que mueve la pose y exige que el centro cambie. La autoridad de Sable viene de `CmiData.ship(UUID)`; `cmiOwner` ausente hereda esa autoridad, pero un dato local malformado u obsoleto produce UNKNOWN.
+- Las ramas explícitas `sable` de inspect, binding, perfil y enable evitan interpretar coordenadas WORLD como coordenadas locales. Los enlaces se guardan como referencias no ejecutables. El perfil escribe `cmiManaged`, `cmiOwner` igual al owner CmiData y `cmiRadarProfile`, pero auto permanece false; `true` de auto/CIWS limpia cualquier flag anterior y devuelve BLOQUEADO. No se crea entidades ni llama a fábricas de proyectil.
+
+### Validación ejecutada
+
+- `clean build --offline` terminó con `BUILD SUCCESSFUL` después de los cambios de código. Pasaron las **12 regresiones JavaExec**: `guidanceModeRegression`, `managedGuidanceNbtRegression`, `geometryIntersectionRegression`, `radarSpearModeRegression`, `radarSpearImpactRegression`, `radarSpearStructuralRegression`, `radarSpearBlastGeometryRegression`, `shotContextRegression`, `shipOwnershipRegression`, `radarSpearLockRegression`, `ciwsPolicyRegression` y `mountedBlockReferenceRegression`.
+- Pasaron los **10 verificadores existentes**: `Verify-Artifact.ps1`, `Verify-CIWS.ps1`, `Verify-Geometry.ps1`, `Verify-GuidanceBytecode.ps1`, `Verify-MixinTargets.ps1`, `Verify-RadarAutomation.ps1`, `Verify-RadarSpearArea.ps1`, `Verify-RadarSpearArrowCollision.ps1`, `Verify-RadarSpearBytecode.ps1` y `Verify-SableBytecode.ps1`. `Verify-SableMountedSystems.ps1` también pasó con los tres JAR fijados; comprobó lookup/tick Sable, la rama Warium condicionada a ServerLevel y la firma nativa `spawn(Level, ...)`, y los guardas de referencias, ownership y comandos.
+- `git diff --check` terminó sin errores. SHA-256 del JAR generado `build/libs/create-military-integration-0.1.0-dev.jar`: `E3B9E4B632A731F42B88F54652C1CF08C9C71ED9EF6BADB438739B09740D789C`.
+- **PENDIENTE DE VALIDACIÓN EN JUEGO:** resolución real de BE en un plot cargado, posición mientras se mueve una nave, sugerencias/ejecución de los comandos en servidor y cualquier integración runtime. No se iniciará Minecraft, cliente, servidor ni GameTest en este ciclo.
+
+### Capacidades BLOQUEADAS
+
+- Radar físico montado en Sable: el scanner de Radars necesita tick de block entity, que la cadena fijada del plot no ejecuta; sus tracks no pueden considerarse renovados.
+- Radar Spear automático montado en Sable: además de los tracks, la inserción nativa Warium requiere `ServerLevel`; no se debe pasar el accessor del plot ni enviar coordenadas locales como mundiales.
+- CIWS montado en Sable: no se acreditó el tick, orientación, muzzle y fireShot nativos de un CBC/Neo Warfare guardado dentro del plot.
+- Todas las limitaciones anteriores se documentan desde bytecode leído, no desde una ejecución. No se afirma compatibilidad runtime ni se hace spawn manual de proyectiles.
+
 ## Ciclo 2G — CIWS automático (solo estático)
 
 ### ACREDITADO ESTÁTICAMENTE

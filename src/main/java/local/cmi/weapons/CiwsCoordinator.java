@@ -19,6 +19,7 @@ import java.util.WeakHashMap;
 import local.cmi.core.Actor;
 import local.cmi.core.CombatServices;
 import local.cmi.core.MilitaryContact;
+import local.cmi.core.MountedBlockReference;
 import local.cmi.core.Relation;
 import local.cmi.core.TargetId;
 import local.cmi.core.TrajectorySafety;
@@ -89,6 +90,37 @@ public final class CiwsCoordinator {
         CompoundTag data = mount.getPersistentData();
         data.putString(RADAR_DIM, level.dimension().location().toString());
         data.putLong(RADAR_POS, radarPos.asLong());
+        data.put("cmiRadarReference", MountedBlockReference.world(level.dimension().location(), radarPos).save());
+        mount.setChanged();
+        return null;
+    }
+
+    /** Stores a typed onboard radar reference for inspection; this binding never authorizes CIWS operation. */
+    public static String bindSableRadar(ServerLevel parent, UUID mountShip, BlockPos mountLocalPos,
+                                        UUID radarShip, BlockPos radarLocalPos, UUID player) {
+        MountedBlockReference mountRef = MountedBlockReference.sable(parent.dimension().location(), mountShip, mountLocalPos);
+        MountedBlockReference radarRef = MountedBlockReference.sable(parent.dimension().location(), radarShip, radarLocalPos);
+        var resolvedMount = mountRef.resolve(parent).orElse(null);
+        if (resolvedMount == null || !(resolvedMount.blockEntity() instanceof CompactCannonMountBlockEntity mount))
+            return "mount must resolve to a loaded compact mount in the selected Sable plot";
+        CompoundTag data = mount.getPersistentData();
+        if (data.contains(MODE) && (!data.contains(MODE, Tag.TAG_BYTE) || data.getBoolean(MODE)))
+            return "disable CIWS before changing the stored Sable radar reference";
+        Actor mountActor = mountRef.actor(parent);
+        if (mountActor.owner() == null || !mountActor.owner().equals(player))
+            return "assign this player as the Sable ship owner with /cmi shipowner first";
+        if (data.contains("cmiOwner") && (!data.hasUUID("cmiOwner") || !mountActor.owner().equals(data.getUUID("cmiOwner"))))
+            return "mount CMI owner conflicts with CmiData.ship(shipUuid)";
+
+        var resolvedRadar = radarRef.resolve(parent).orElse(null);
+        if (resolvedRadar == null || !realRadar(resolvedRadar.blockEntity()))
+            return "radar must resolve to a loaded Stationary Radar or Radar Bearing in a Sable plot";
+        Actor radarActor = radarRef.actor(parent);
+        if (radarActor.owner() == null || !mountActor.owner().equals(radarActor.owner()))
+            return "radar ship and mount ship must have the same known CMI owner";
+
+        data.put("cmiCiwsSableRadarReference", radarRef.save());
+        data.putBoolean("cmiCiwsSableBindingExecutable", false);
         mount.setChanged();
         return null;
     }
@@ -110,6 +142,12 @@ public final class CiwsCoordinator {
         CompoundTag data = mount.getPersistentData();
         data.putBoolean(MODE, enabled);
         data.remove(LAST_UPDATE); data.remove(LAST_FIRE); data.remove(HOLD);
+        mount.setChanged();
+    }
+
+    /** Disables a plot-mounted mode without treating the plot storage position as a world reservation key. */
+    public static void disableNonExecutableMounted(CompactCannonMountBlockEntity mount) {
+        mount.getPersistentData().putBoolean(MODE, false);
         mount.setChanged();
     }
 

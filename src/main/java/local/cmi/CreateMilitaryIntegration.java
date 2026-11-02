@@ -128,5 +128,6 @@ public final class CreateMilitaryIntegration {
                 var s=ctx.getSource();var p=BlockPosArgument.getLoadedBlockPos(ctx,"pos");var be=s.getLevel().getBlockEntity(p);if(be==null)return 0;
                 be.getPersistentData().putBoolean("cmiManaged",BoolArgumentType.getBool(ctx,"enabled"));be.getPersistentData().putUUID("cmiOwner",s.getPlayerOrException().getUUID());be.setChanged();s.sendSuccess(()->Component.literal("CMI managed launcher flag updated; native Radar Spear coordinate contract remains required"),false);return 1;
             })))));
+        MountedSystemCommands.register(e.getDispatcher());
     }
 }

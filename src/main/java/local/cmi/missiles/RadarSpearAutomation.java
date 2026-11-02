@@ -23,6 +23,7 @@ import net.minecraft.world.phys.Vec3;
 import local.cmi.core.Actor;
 import local.cmi.core.CombatServices;
 import local.cmi.core.MilitaryContact;
+import local.cmi.core.MountedBlockReference;
 import local.cmi.core.Relation;
 import local.cmi.core.TargetId;
 
@@ -93,7 +94,38 @@ public final class RadarSpearAutomation {
         if (!radar.isRunning()) return "the selected physical radar is not running";
         data.putString(RADAR_DIM, level.dimension().location().toString());
         data.putLong(RADAR_POS, radarPos.asLong());
+        data.put("cmiRadarReference", MountedBlockReference.world(level.dimension().location(), radarPos).save());
         clearLock(data);
+        launcher.setChanged();
+        return null;
+    }
+
+    /** Stores a typed onboard radar reference for inspection; this binding never enables automation or fire. */
+    public static String bindSableRadar(ServerLevel parent, UUID hardpointShip, BlockPos hardpointLocalPos,
+                                        UUID radarShip, BlockPos radarLocalPos, UUID player) {
+        MountedBlockReference hardpointRef = MountedBlockReference.sable(parent.dimension().location(), hardpointShip, hardpointLocalPos);
+        MountedBlockReference radarRef = MountedBlockReference.sable(parent.dimension().location(), radarShip, radarLocalPos);
+        var resolvedLauncher = hardpointRef.resolve(parent).orElse(null);
+        if (resolvedLauncher == null || !(resolvedLauncher.blockEntity() instanceof RadarSpearMissileHardpointBlockEntity launcher))
+            return "hardpoint must resolve to a loaded Radar Spear hardpoint in the selected Sable plot";
+        CompoundTag data = launcher.getPersistentData();
+        if (data.contains(AUTO) && (!data.contains(AUTO, Tag.TAG_BYTE) || data.getBoolean(AUTO)))
+            return "disable Radar Spear auto before changing the stored Sable radar reference";
+        Actor launcherActor = hardpointRef.actor(parent);
+        if (launcherActor.owner() == null || !launcherActor.owner().equals(player))
+            return "assign this player as the Sable ship owner with /cmi shipowner first";
+        if (data.contains("cmiOwner") && (!data.hasUUID("cmiOwner") || !launcherActor.owner().equals(data.getUUID("cmiOwner"))))
+            return "hardpoint CMI owner conflicts with CmiData.ship(shipUuid)";
+
+        var resolvedRadar = radarRef.resolve(parent).orElse(null);
+        if (resolvedRadar == null || !realRadar(resolvedRadar.blockEntity()))
+            return "radar must resolve to a loaded Stationary Radar or Radar Bearing in a Sable plot";
+        Actor radarActor = radarRef.actor(parent);
+        if (radarActor.owner() == null || !launcherActor.owner().equals(radarActor.owner()))
+            return "radar ship and hardpoint ship must have the same known CMI owner";
+
+        data.put("cmiRadarSableReference", radarRef.save());
+        data.putBoolean("cmiRadarSableBindingExecutable", false);
         launcher.setChanged();
         return null;
     }
