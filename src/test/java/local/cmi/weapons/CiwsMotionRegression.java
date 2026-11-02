@@ -2,6 +2,7 @@ package local.cmi.weapons;
 
 import com.mrvew.firecontrol.ballistics.TargetMotion;
 import com.mrvew.firecontrol.ballistics.V3;
+import java.util.ConcurrentModificationException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Set;
@@ -137,6 +138,83 @@ public final class CiwsMotionRegression {
         cleanup.clearChunk(observer.dimension(),new ChunkPos(radarPos));
         check(cleanup.size()==0,"unloading the linked radar's chunk clears its temporal history");
 
+        var lru=new CiwsMotionTracker();
+        try {
+            for(int i=0;i<CiwsMotionTracker.MAX_ENTRIES+1;i++) {
+                var observed=observerAt(i,owner);
+                lru.observe(observed,new UUID(0,i+1L),provenance,20,p0,v0,20);
+            }
+        } catch (ConcurrentModificationException failure) {
+            throw new AssertionError("LRU overflow must not modify the access-order map through its active iterator",failure);
+        }
+        check(lru.activeObserverCount()==CiwsMotionTracker.MAX_ENTRIES&&lru.size()==CiwsMotionTracker.MAX_ENTRIES,
+                "observer and history memory bounds remain effective at 2,049 inserts");
+        check(lru.history(observerAt(0,owner),new UUID(0,1L))==null,"least-recently-used observer and its history are evicted");
+        check(lru.history(observerAt(1,owner),new UUID(0,2L))!=null&&
+                lru.history(observerAt(CiwsMotionTracker.MAX_ENTRIES,owner),new UUID(0,CiwsMotionTracker.MAX_ENTRIES+1L))!=null,
+                "non-evicted and newest observers retain their histories");
+        check(lru.pruneOncePerSweep("minecraft:overworld",22)&&!lru.pruneOncePerSweep("minecraft:overworld",22),
+                "LRU history cleanup runs at most once for the same dimension sweep");
+        check(lru.pruneOncePerSweep("minecraft:overworld",32)&&lru.size()==0&&lru.activeObserverCount()==0,
+                "scheduled expiration remains compatible with LRU-managed observer histories");
+
+        var lruWithAccess=new CiwsMotionTracker();
+        for(int i=0;i<CiwsMotionTracker.MAX_ENTRIES;i++) {
+            var observed=observerAt(i,owner);
+            lruWithAccess.observe(observed,new UUID(1,i+1L),provenance,20,p0,v0,20);
+        }
+        var touched=observerAt(0,owner);
+        check(lruWithAccess.beginObservation(touched,21),"consulting an existing observer refreshes its LRU recency");
+        var newest=observerAt(CiwsMotionTracker.MAX_ENTRIES,owner);
+        lruWithAccess.observe(newest,new UUID(1,CiwsMotionTracker.MAX_ENTRIES+1L),provenance,21,p0,v0,21);
+        check(lruWithAccess.activeObserverCount()==CiwsMotionTracker.MAX_ENTRIES&&
+                lruWithAccess.history(touched,new UUID(1,1L))!=null&&
+                lruWithAccess.history(observerAt(1,owner),new UUID(1,2L))==null&&
+                lruWithAccess.history(newest,new UUID(1,CiwsMotionTracker.MAX_ENTRIES+1L))!=null,
+                "a recently consulted observer survives while the next-oldest observer and history are evicted");
+
+        var cadence=new CiwsMotionTracker();
+        var oldObserver=new CiwsMotionTracker.Observer("minecraft:overworld",101L,201L,owner,null);
+        var recentObserver=new CiwsMotionTracker.Observer("minecraft:overworld",102L,202L,owner,null);
+        cadence.observe(oldObserver,target,provenance,1,p0,v0,1);
+        cadence.observe(recentObserver,otherTarget,provenance,10,p1,v1,10);
+        check(cadence.pruneOncePerSweep("minecraft:overworld",12),"first mount performs the dimension's scheduled cleanup");
+        check(!cadence.pruneOncePerSweep("minecraft:overworld",12),"second mount in the same dimension/tick does not repeat full cleanup");
+        check(cadence.history(oldObserver,target)==null&&cadence.history(recentObserver,otherTarget)!=null,
+                "expiration removes old histories and retains recent ones");
+        check(cadence.pruneOncePerSweep("minecraft:the_nether",102)&&
+                !cadence.pruneOncePerSweep("minecraft:the_nether",102),"dimensions keep independent cleanup cadences and clocks");
+        check(cadence.pruneOncePerSweep("minecraft:overworld",17),"the next five-tick sweep permits another cleanup");
+
+        var resetCadence=new CiwsMotionTracker();
+        var resetObserver=new CiwsMotionTracker.Observer("minecraft:overworld",301L,401L,owner,null);
+        resetCadence.observe(resetObserver,target,provenance,500,p0,v0,500);
+        check(resetCadence.pruneOncePerSweep(resetObserver.dimension(),502),"initial clock epoch is recorded");
+        check(!resetCadence.pruneOncePerSweep(resetObserver.dimension(),503),"non-sweep clock observations remain constant-time and do not prune");
+        check(resetCadence.pruneOncePerSweep(resetObserver.dimension(),502)&&
+                resetCadence.history(resetObserver,target)==null&&
+                !resetCadence.pruneOncePerSweep(resetObserver.dimension(),502),
+                "rollback to the exact prior sweep clears dimension history and is handled only once");
+        resetCadence.observe(resetObserver,target,provenance,3,p0,v0,3);
+        check(resetCadence.pruneOncePerSweep(resetObserver.dimension(),-1)&&resetCadence.history(resetObserver,target)==null&&
+                !resetCadence.pruneOncePerSweep(resetObserver.dimension(),-1),
+                "invalid time clears that dimension once and fails closed");
+
+        var resetByUnload=new CiwsMotionTracker();
+        check(resetByUnload.pruneOncePerSweep("minecraft:overworld",12)&&
+                !resetByUnload.pruneOncePerSweep("minecraft:overworld",12),"dimension cadence is initially memoized");
+        resetByUnload.clearDimension("minecraft:overworld");
+        check(resetByUnload.pruneOncePerSweep("minecraft:overworld",12),"dimension unload resets its cadence metadata");
+        check(resetByUnload.pruneOncePerSweep("minecraft:the_nether",12),"second dimension maintains separate cadence state");
+        resetByUnload.clear();
+        check(resetByUnload.size()==0&&resetByUnload.pruneOncePerSweep("minecraft:overworld",12)&&
+                resetByUnload.pruneOncePerSweep("minecraft:the_nether",12),"server stop clears histories and all cadence metadata");
+        var boundedMaintenance=new CiwsMotionTracker();
+        for(int i=0;i<CiwsMotionTracker.MAX_ENTRIES+1;i++)
+            boundedMaintenance.pruneOncePerSweep("test:dimension_"+i,2);
+        check(boundedMaintenance.maintenanceDimensionCount()==CiwsMotionTracker.MAX_ENTRIES,
+                "per-dimension clock metadata remains bounded at the shared 2,048-entry limit");
+
         String coordinator=Files.readString(Path.of("src/main/java/local/cmi/weapons/CiwsCoordinator.java"));
         String trackerSource=Files.readString(Path.of("src/main/java/local/cmi/weapons/CiwsMotionTracker.java"));
         String integration=Files.readString(Path.of("src/main/java/local/cmi/CreateMilitaryIntegration.java"));
@@ -148,6 +226,11 @@ public final class CiwsMotionRegression {
         check(coordinator.contains("CiwsMotionPolicy.atImpact")&&coordinator.contains("TrajectorySafety.clear")&&coordinator.contains("CombatServices.relation")&&coordinator.contains("CombatServices.canEngage")&&coordinator.contains("radarTrackStillCurrent(binding.radar()"),"prediction requires hit-margin, final physical-track refresh, IFF and safe corridor");
         check(!coordinator.contains("CombatServices.neutralize(")&&!coordinator.contains("new AbstractCannonProjectile"),"prediction cannot synthesize or neutralize an impact");
         check(integration.contains("CiwsCoordinator.clearDimension")&&integration.contains("CiwsCoordinator.clearChunk")&&coordinator.contains("MOTION.beginObservation(observer, now)"),"dimension and mount/radar chunk unload and source changes clear temporal state");
+        check(trackerSource.contains("activeObservers.entrySet().iterator()")&&!trackerSource.contains("activeObservers.get(eldest)"),"LRU eviction uses its current entry without access-order map lookup");
+        int pruneCall=coordinator.indexOf("MOTION.pruneOncePerSweep(dimension, now)");
+        int modeGate=coordinator.indexOf("if (!data.contains(MODE",pruneCall);
+        int cadenceGate=coordinator.indexOf("if (now % 5 != 2",pruneCall);
+        check(pruneCall>=0&&modeGate>pruneCall&&cadenceGate>pruneCall&&!coordinator.contains("MOTION.prune(dimension, now)"),"cheap clock observation runs per mount while the tracker gates full dimension cleanup per sweep");
         System.out.println("OK: CIWS physical-radar sample cadence, bounded history, acceleration confidence, uncertainty margin, fast linear CBC path and fail-closed gates");
     }
 
@@ -171,5 +254,10 @@ public final class CiwsMotionRegression {
         tracker.observe(observer,target,provenance,201,p0,v0,202);
         tracker.observe(observer,target,provenance,206,p1,v1,207);
         return tracker.observe(observer,target,provenance,211,p2,v2,212).history();
+    }
+
+    private static CiwsMotionTracker.Observer observerAt(int index, UUID owner) {
+        long position = new BlockPos(index,70,0).asLong();
+        return new CiwsMotionTracker.Observer("minecraft:overworld",position,position,owner,null);
     }
 }

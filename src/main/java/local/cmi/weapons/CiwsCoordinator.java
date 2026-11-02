@@ -176,7 +176,7 @@ public final class CiwsCoordinator {
         }
         long now = level.getGameTime();
         String dimension = level.dimension().location().toString();
-        MOTION.prune(dimension, now);
+        MOTION.pruneOncePerSweep(dimension, now);
         if (!data.contains(MODE, Tag.TAG_BYTE) || !data.getBoolean(MODE)) {
             clearLock(level, mount); MOTION.clearMount(dimension, mount.getBlockPos().asLong()); return;
         }

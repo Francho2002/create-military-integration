@@ -2,6 +2,14 @@
 
 Esta tabla describe el código, no una prueba dentro de Minecraft. Compilación no demuestra aplicación correcta de mixins.
 
+## Ciclo 2J.1 — mantenimiento del historial CIWS
+
+- **LRU:** la expulsión ahora itera `activeObservers.entrySet()` y toma el observador de `Entry.getValue()` antes de `Iterator.remove()`. Ya no consulta el mapa de acceso mientras su iterador está activo; se conserva `MAX_ENTRIES = 2048` y se eliminan los historiales del observador expulsado.
+- **Limpieza:** `CiwsCoordinator.tick()` informa al tracker del game time antes de sus salidas por modo/cadencia. El tracker recuerda por dimensión el último tiempo observado y la última limpieza; una limpieza completa solo ocurre en la fase efectiva de cinco ticks y como máximo una vez por dimensión/tick, incluso con muchas monturas. El estado de mantenimiento también está limitado a 2.048 dimensiones.
+- **Fail-closed y ciclo de vida:** el retroceso del tiempo o un valor negativo limpia el historial de esa dimensión; `clearDimension()` elimina sus metadatos de cadencia y `clear()` elimina todos los historiales y estados al detener el servidor. Cada dimensión mantiene su propio reloj. Se conservan expiración de 10 ticks y máximo de 3 muestras.
+- No se modificaron el radar físico, predicción/aceleración, Better Targeting, filtros, IFF, reservas, geometría, solver, orientación ni disparo. Runtime permanece sin validar.
+- **Verificación estática:** `clean build --offline` pasó con las 13 regresiones Java. Pasaron los 13 verificadores estáticos y `git diff --check`. SHA-256 del JAR: `7913F56F10011D486787976F2C3EBCFAB50D9D28AFCBDB4C59E62F2EF65A3BA9`. No se inició el juego y el artefacto no se instaló.
+
 ## Ciclo 2H — referencias de bloque montado en Sable (alcance estático)
 
 - `MountedBlockReference` representa de forma explícita `WORLD` como dimensión + `BlockPos`, y `SABLE` como dimensión padre + UUID de nave + `BlockPos` local estable. En Sable, X/Z empiezan en el chunk mínimo del plot y se convierten con `LevelPlot.toGlobal` a `storedPosition`; Y conserva la coordenada del nivel padre. El chunk se resuelve con la coordenada local que exige `LevelPlot.getChunk`, y el block entity se recupera con `storedPosition`. Resolver exige el subnivel UUID actualmente cargado, no retirado y unido al `ServerLevel` esperado; no solicita cargas, y verifica un block entity vivo cuya posición/level coincidan exactamente. Referencias `WORLD` que caen dentro de un plot se rechazan como ambiguas.

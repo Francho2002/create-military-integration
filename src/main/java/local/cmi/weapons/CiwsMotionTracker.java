@@ -41,6 +41,7 @@ public final class CiwsMotionTracker {
     private record Key(Observer observer, UUID target) {}
     private record MountKey(String dimension, long mountPosition) {}
     private record ActiveObserver(Observer observer, long lastObservedAt) {}
+    private record MaintenanceState(boolean hasPruned, long lastPrunedAt, long lastObservedAt) {}
 
     private static final class Entry {
         final Provenance provenance;
@@ -55,6 +56,7 @@ public final class CiwsMotionTracker {
 
     private final LinkedHashMap<Key, Entry> entries = new LinkedHashMap<>(32, 0.75f, true);
     private final LinkedHashMap<MountKey, ActiveObserver> activeObservers = new LinkedHashMap<>(16, 0.75f, true);
+    private final LinkedHashMap<String, MaintenanceState> maintenanceByDimension = new LinkedHashMap<>(16, 0.75f, true);
 
     /** Establishes the current radar/owner provenance even when no track is presently authorized. */
     public synchronized boolean beginObservation(Observer observer, long now) {
@@ -146,6 +148,7 @@ public final class CiwsMotionTracker {
         if (dimension == null) return;
         entries.keySet().removeIf(key -> key.observer().dimension().equals(dimension));
         activeObservers.keySet().removeIf(key -> key.dimension().equals(dimension));
+        maintenanceByDimension.remove(dimension);
     }
 
     public synchronized void prune(long now) {
@@ -162,11 +165,52 @@ public final class CiwsMotionTracker {
                 expired(now, entry.getValue().lastObservedAt()));
     }
 
+    /**
+     * Runs full expiration at most once per CMI five-tick sweep and dimension. A clock rollback
+     * invalidates that dimension's histories before accepting the new clock epoch.
+     */
+    public synchronized boolean pruneOncePerSweep(String dimension, long now) {
+        if (dimension == null || dimension.isBlank()) {
+            clear();
+            return false;
+        }
+        MaintenanceState previous = maintenanceByDimension.get(dimension);
+        if (now < 0) {
+            if (previous != null && previous.lastObservedAt() == now) return false;
+            clearDimension(dimension);
+            maintenanceByDimension.put(dimension, new MaintenanceState(true, now, now));
+            trimMaintenanceState();
+            return true;
+        }
+        if (previous != null && now < previous.lastObservedAt()) {
+            clearDimension(dimension);
+            maintenanceByDimension.put(dimension, new MaintenanceState(true, now, now));
+            trimMaintenanceState();
+            return true;
+        }
+        boolean duplicateSweep = previous != null && previous.hasPruned() && previous.lastPrunedAt() == now;
+        long lastPrunedAt = previous == null ? 0 : previous.lastPrunedAt();
+        boolean hasPruned = previous != null && previous.hasPruned();
+        if (now % SCAN_INTERVAL_TICKS != 2 || duplicateSweep) {
+            maintenanceByDimension.put(dimension, new MaintenanceState(hasPruned, lastPrunedAt, now));
+            trimMaintenanceState();
+            return false;
+        }
+
+        prune(dimension, now);
+        maintenanceByDimension.put(dimension, new MaintenanceState(true, now, now));
+        trimMaintenanceState();
+        return true;
+    }
+
     public synchronized int size() { return entries.size(); }
+    synchronized int activeObserverCount() { return activeObservers.size(); }
+    synchronized int maintenanceDimensionCount() { return maintenanceByDimension.size(); }
 
     public synchronized void clear() {
         entries.clear();
         activeObservers.clear();
+        maintenanceByDimension.clear();
     }
 
     private void activate(Observer observer, long now) {
@@ -176,11 +220,19 @@ public final class CiwsMotionTracker {
             entries.keySet().removeIf(entry -> entry.observer().equals(previous.observer()));
         }
         while (activeObservers.size() > MAX_ENTRIES) {
-            Iterator<MountKey> iterator = activeObservers.keySet().iterator();
-            MountKey eldest = iterator.next();
-            ActiveObserver removed = activeObservers.get(eldest);
+            Iterator<Map.Entry<MountKey, ActiveObserver>> iterator = activeObservers.entrySet().iterator();
+            Map.Entry<MountKey, ActiveObserver> eldest = iterator.next();
+            ActiveObserver removed = eldest.getValue();
             iterator.remove();
             if (removed != null) entries.keySet().removeIf(entry -> entry.observer().equals(removed.observer()));
+        }
+    }
+
+    private void trimMaintenanceState() {
+        while (maintenanceByDimension.size() > MAX_ENTRIES) {
+            Iterator<Map.Entry<String, MaintenanceState>> iterator = maintenanceByDimension.entrySet().iterator();
+            iterator.next();
+            iterator.remove();
         }
     }
 

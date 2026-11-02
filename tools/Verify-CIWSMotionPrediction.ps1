@@ -27,6 +27,21 @@ function Section([string]$listing, [string]$header) {
     if ($next.Success) { return $rest.Substring(0, $next.Index) }
     return $rest
 }
+function SourceSection([string]$source, [string]$signature) {
+    $start = $source.IndexOf($signature, [StringComparison]::Ordinal)
+    if ($start -lt 0) { throw "Missing source method: $signature" }
+    $open = $source.IndexOf('{', $start)
+    if ($open -lt 0) { throw "Missing method body: $signature" }
+    $depth = 0
+    for ($i = $open; $i -lt $source.Length; $i++) {
+        if ($source[$i] -eq '{') { $depth++ }
+        elseif ($source[$i] -eq '}') {
+            $depth--
+            if ($depth -eq 0) { return $source.Substring($start, $i - $start + 1) }
+        }
+    }
+    throw "Unclosed method body: $signature"
+}
 function Descriptor([string]$listing, [string]$method, [string]$descriptor) {
     $pattern = [regex]::Escape($method) + '\([^\r\n]*\);\s*descriptor:\s*' + [regex]::Escape($descriptor)
     if ($listing -notmatch $pattern) { throw "Descriptor mismatch: $method $descriptor" }
@@ -104,6 +119,7 @@ foreach ($term in @('radar.getTracks()', 'target instanceof MunitionsPhysicsCont
         'MOTION.observe(observer, id', 'track.scannedTime()', 'Ships.v3(track.position())', 'Ships.v3(track.velocity())',
         'new CiwsMotionTracker.Provenance(contact.owner(), contact.platform())',
         'MOTION.beginObservation(observer, now)',
+        'MOTION.pruneOncePerSweep(dimension, now)',
         'V3 targetAcceleration = motionAssessment == null ? V3.ZERO : motionAssessment.acceleration()',
         'new TargetMotion(Ships.v3(contact.position()), Ships.v3(velocity), targetAcceleration)',
         'plan.solver().approach(aim.barrel())', 'solver.path(direction, lifetime)',
@@ -120,6 +136,30 @@ foreach ($term in @('SCAN_INTERVAL_TICKS = 5', 'MAX_SAMPLES = 3', 'MAX_ENTRIES =
         'inChunk(observer.mountPosition(), chunk)', 'inChunk(observer.radarPosition(), chunk)')) {
     Has $tracker $term 'bounded source-aware temporal sample history'
 }
+$lruStart = $tracker.IndexOf('private void activate(', [StringComparison]::Ordinal)
+if ($lruStart -lt 0) { throw 'Missing bounded active-observer LRU eviction' }
+$lruRest = $tracker.Substring($lruStart)
+$lruEnd = $lruRest.IndexOf('private static boolean belongsTo', [StringComparison]::Ordinal)
+if ($lruEnd -lt 0) { throw 'Cannot isolate the LRU eviction method' }
+$lru = $lruRest.Substring(0, $lruEnd)
+foreach ($term in @('activeObservers.entrySet().iterator()', 'Map.Entry<MountKey, ActiveObserver> eldest = iterator.next()',
+        'eldest.getValue()', 'iterator.remove()', 'entries.keySet().removeIf')) {
+    Has $lru $term 'safe iterator-based LRU eviction'
+}
+Require (!$lru.Contains('activeObservers.get(')) 'LRU eviction must not perform access-order lookup while its iterator is active'
+$maintenance = SourceSection $tracker 'public synchronized boolean pruneOncePerSweep('
+foreach ($term in @('now < 0', 'previous.lastObservedAt()', 'clearDimension(dimension)', 'now % SCAN_INTERVAL_TICKS', 'maintenanceByDimension.get',
+        'maintenanceByDimension.put', 'prune(dimension, now)', 'trimMaintenanceState')) {
+    Has $maintenance $term 'per-dimension sweep-gated pruning, rollback clearing, and bounded cadence state'
+}
+Require ($tracker.Contains('maintenanceByDimension.size() > MAX_ENTRIES')) 'Per-dimension cadence metadata must have a fixed memory cap'
+Has $tracker 'maintenanceByDimension.remove(dimension)' 'dimension unload resets pruning cadence'
+Has $tracker 'maintenanceByDimension.clear()' 'server stop resets all pruning cadence'
+$tick = SourceSection $coordinator 'public static void tick(ServerLevel level, CompactCannonMountBlockEntity mount)'
+$tickMode = $tick.IndexOf('if (!data.contains(MODE', [StringComparison]::Ordinal)
+$tickCadence = $tick.IndexOf('if (now % 5 != 2', [StringComparison]::Ordinal)
+$tickPrune = $tick.IndexOf('MOTION.pruneOncePerSweep(dimension, now)', [StringComparison]::Ordinal)
+Require ($tickPrune -ge 0 -and $tickMode -gt $tickPrune -and $tickCadence -gt $tickPrune -and !$tick.Contains('MOTION.prune(dimension, now)')) 'Coordinator observes per-dimension clock before mount/cadence exits; tracker alone gates the full sweep'
 foreach ($term in @('Model { LINEAR, ACCELERATED, UNRELIABLE, INVALID, INSUFFICIENT }',
         'recentAcceleration', 'firstAcceleration', 'differenceOverObservedInterval',
         '0.5 * accelerationError * flightTicks * flightTicks', 'solverMiss >= hitTolerance')) {
@@ -135,7 +175,7 @@ foreach ($term in @('CiwsMotionTracker.observe', 'CiwsMotionPolicy.assess', 'Ciw
         'MunitionsPhysicsContraptionEntity', 'RadarTrack.scannedTime', 'WeaponAdapters.fire')) {
     Has $artifactCoordinator $term 'compiled CIWS motion integration'
 }
-foreach ($term in @('MAX_SAMPLES', 'MAX_ENTRIES', 'SCAN_INTERVAL_TICKS', 'prune')) { Has $artifactTracker $term 'compiled bounded motion history' }
+foreach ($term in @('MAX_SAMPLES', 'MAX_ENTRIES', 'SCAN_INTERVAL_TICKS', 'pruneOncePerSweep', 'maintenanceByDimension', 'java/util/Map$Entry.getValue', 'java/util/Iterator.remove')) { Has $artifactTracker $term 'compiled bounded motion history and iterator-safe eviction' }
 foreach ($term in @('ACCELERATED', 'UNRELIABLE', 'atImpact')) { Has $artifactPolicy $term 'compiled confidence policy' }
 
 'OK: fixed TargetMotion acceleration and 30-tick horizon; solve/approach share target projection while path remains the shell path; physical radar cadence and value-only CIWS motion gating verified. Static only; runtime remains unverified.'

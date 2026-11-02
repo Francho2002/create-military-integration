@@ -318,3 +318,21 @@ La validación de 2J es exclusivamente estática. Cualquier seguimiento y predic
 - `git diff --check`: sin errores de whitespace; Git mostró únicamente su aviso normal de conversión CRLF→LF en `VALIDATION.md`.
 - SHA-256 del artefacto construido `build/libs/create-military-integration-0.1.0-dev.jar`: `3854175D7AD4AF7921466462BCA70E203237D30A863D5DCE8559F1A243D6FB4D`.
 - No se ejecutó Minecraft, cliente, servidor o GameTest. No se copiaron archivos a los perfiles ni al servidor. El build de desarrollo no acredita tejido efectivo de mixins ni intercepción runtime.
+
+## Ciclo 2J.1 — regresiones de mantenimiento
+
+### Cambios comprobados por regresión
+
+- La regresión `ciwsMotionRegression` activa 2.049 observadores y comprueba que no se produce `ConcurrentModificationException`, que el observador menos reciente y su historial salen, y que el límite de 2.048 entradas permanece. Una segunda secuencia consulta primero al observador más antiguo y comprueba que el LRU conserva el orden por acceso y expulsa al siguiente más antiguo.
+- La misma suite verifica que dos monturas en la misma dimensión/tick solo causan una limpieza global; las dimensiones mantienen estados de reloj separados; la fase siguiente permite limpiar de nuevo; se eliminan historiales vencidos y permanecen los recientes; un rollback (incluido el retorno al timestamp del barrido anterior) invalida el historial; tiempo negativo falla cerrado; descarga de dimensión y parada limpian metadatos; y la memoria de cadencia queda limitada a 2.048 dimensiones.
+- `CiwsCoordinator` consulta la cadencia por dimensión antes de las salidas de modo y frecuencia. La llamada por montura solo hace comprobaciones O(1); la iteración completa de historiales ocurre como máximo una vez en la fase `gameTime % 5 == 2` para esa dimensión y timestamp.
+
+### Validación del ciclo 2J.1
+
+`clean build --offline`: **BUILD SUCCESSFUL**. `check` ejecutó las 13 regresiones Java, incluida `ciwsMotionRegression`, que pasó con 2.049 observadores, reordenamiento por acceso, expulsión y limpieza de historiales.
+
+Pasaron los 13 verificadores: `Verify-Artifact.ps1`, `Verify-CIWS.ps1`, `Verify-Geometry.ps1`, `Verify-GuidanceBytecode.ps1`, `Verify-MixinTargets.ps1`, `Verify-MultiblockMissileRadar.ps1`, `Verify-RadarAutomation.ps1`, `Verify-RadarSpearArea.ps1`, `Verify-RadarSpearArrowCollision.ps1`, `Verify-RadarSpearBytecode.ps1`, `Verify-SableBytecode.ps1`, `Verify-SableMountedSystems.ps1` y `Verify-CIWSMotionPrediction.ps1`. `git diff --check` pasó; Git solo informó su conversión habitual CRLF→LF en `VALIDATION.md`.
+
+SHA-256 de `build/libs/create-military-integration-0.1.0-dev.jar`: `7913F56F10011D486787976F2C3EBCFAB50D9D28AFCBDB4C59E62F2EF65A3BA9`.
+
+No se ejecutaron Minecraft, cliente, servidor ni GameTest; no se copiaron JARs instalados. Las integraciones de predicción y disparo siguen sin acreditación runtime.
