@@ -172,6 +172,8 @@ foreach ($scenario in @('A:', 'B:', 'C:', 'D:', 'E:', 'F:', 'G:', 'H:', 'I:', 'J
     Has $regression $scenario 'coordination scenario regression'
 }
 Has $regression 'ReservationBook<TargetId>' 'coordination tests use real TargetId-keyed reservation semantics'
+Has $regression 'reservation remains exclusive through its inclusive until tick' 'inclusive reservation deadline regression'
+Has $regression 'another mount cannot release the reservation owner' 'reservation owner-only release regression'
 
 # Inspect compiled output as well as source. No physical mods or game process are loaded.
 $artifactCoordinator = Listing $Artifact 'local.cmi.weapons.CiwsCoordinator'

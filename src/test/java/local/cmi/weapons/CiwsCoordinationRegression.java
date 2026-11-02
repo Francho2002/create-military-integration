@@ -44,7 +44,13 @@ public final class CiwsCoordinationRegression {
         // D: the shared reservation book permits reuse after its real expiry.
         var expiring = new ReservationBook<TargetId>();
         check(reserve(expiring, x, mountA, 20, 10), "D: old reservation starts");
-        check(reserve(expiring, x, mountB, 31, 10), "D: an expired reservation can be assigned anew");
+        check(!reserve(expiring, x, mountB, 30, 10), "D: reservation remains exclusive through its inclusive until tick");
+        expiring.release(target(x), mountB);
+        check(!reserve(expiring, x, mountB, 30, 10), "D: another mount cannot release the reservation owner's lease");
+        expiring.release(target(x), mountA);
+        check(reserve(expiring, x, mountB, 30, 10), "D: release by the owner permits immediate reassignment");
+        check(!reserve(expiring, x, mountA, 40, 10), "D: reassigned lease remains exclusive through its until tick");
+        check(reserve(expiring, x, mountA, 41, 10), "D: an expired reservation can be assigned anew");
 
         // E: lost ownership cannot retain a reservation or pass the existing authorization policy.
         var ownership = new ReservationBook<TargetId>();
