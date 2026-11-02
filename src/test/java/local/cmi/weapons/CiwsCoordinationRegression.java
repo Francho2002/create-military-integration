@@ -137,7 +137,7 @@ public final class CiwsCoordinationRegression {
                 "L: top eight ordering is independent of radar snapshot order");
         List<CiwsPolicy.Candidate> ninthSafe = CiwsCoordinationPolicy.orderedCandidates(null, many.subList(0, 9), null, 8);
         check(ninthSafe.size() == 8 && ninthSafe.stream().noneMatch(c -> c.id().equals(id(208))),
-                "L: ninth candidate is dropped without discarding the first eight safe candidates");
+                "L: ninth candidate is dropped without discarding the first eight eligible pre-solver candidates");
         List<CiwsPolicy.Candidate> withCurrent = CiwsCoordinationPolicy.orderedCandidates(id(207), many, null, 8);
         check(withCurrent.get(0).id().equals(id(207)) && withCurrent.size() == 8,
                 "L: current target is retained only while it remains among eligible candidates");

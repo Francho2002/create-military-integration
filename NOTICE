@@ -1,0 +1,5 @@
+Create Military Integration (CMI) is independently authored software. Its source and binaries are distributed under the terms in LICENSE.
+
+This package does not include third-party mod JARs. Minecraft, NeoForge, Create, Sable, CBC, Neo Warfare, Warium, Create: Radars, Better Targeting, FTB and MineColonies retain their own names, trademarks, code and license terms. Install those components separately from their authorized sources.
+
+See THIRD_PARTY.md and COMPATIBILITY.md for the inspected components and fixed profile versions. CMI's license does not grant redistribution rights for external mods or APIs.

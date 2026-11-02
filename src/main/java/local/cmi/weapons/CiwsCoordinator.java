@@ -365,7 +365,7 @@ public final class CiwsCoordinator {
         MOTION.retain(observer, authorizedTracks);
 
         // Rank every fully authorized, finite candidate before invoking the comparatively expensive
-        // firing solver. A busy radar must not erase the first eight safe plans when it has a ninth.
+        // firing solver. A busy radar must not erase the first eight eligible candidates when it has a ninth.
         List<CiwsPolicy.Candidate> selected = CiwsCoordinationPolicy.orderedCandidates(currentTarget,
                 eligible.stream().map(PlanInput::candidate).toList(), deferredTarget, MAX_CANDIDATES);
         List<Plan> result = new ArrayList<>(selected.size());

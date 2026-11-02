@@ -356,3 +356,33 @@ No se ejecutaron Minecraft, cliente, servidor ni GameTest; no se copiaron JARs i
 - **14 verificadores** aprobaron: `Verify-Artifact.ps1`, `Verify-CIWS.ps1`, `Verify-CiwsCoordination.ps1`, `Verify-CIWSMotionPrediction.ps1`, `Verify-Geometry.ps1`, `Verify-GuidanceBytecode.ps1`, `Verify-MixinTargets.ps1`, `Verify-MultiblockMissileRadar.ps1`, `Verify-RadarAutomation.ps1`, `Verify-RadarSpearArea.ps1`, `Verify-RadarSpearArrowCollision.ps1`, `Verify-RadarSpearBytecode.ps1`, `Verify-SableBytecode.ps1` y `Verify-SableMountedSystems.ps1`. El verificador de coordinación confirmó localmente los hashes de los 11 JAR fijados y el bytecode del JAR de CMI.
 - `git diff --check`: aprobado. SHA-256 de `build/libs/create-military-integration-0.1.0-dev.jar`: `18C3705D6A8F8F09E45C1887B625CA7DAFF1C1CFF3B3C0157640989BD7ABD938`.
 - No se inició Minecraft, cliente, servidor ni GameTest. No se modificó KxCraft, no se copiaron JAR instalados y no se publicó a `main` ni release. La distribución física entre varias monturas continúa **PENDIENTE DE VALIDACIÓN EN JUEGO**.
+
+## Ciclo 2L — auditoría final y paquete experimental
+
+### Defecto de saturación corregido
+
+El defecto estaba en `CiwsCoordinator.plans()`: cada candidato pasaba los filtros, actualizaba la historia si correspondía y el método llamaba `FiringSolver.solve()` inmediatamente. Cuando el contador llegaba a nueve, se ejecutaba `MOTION.clearMount(...)` y se retornaba `null`, descartando cualquier plan anterior. Por tanto no se cumplía realmente un límite de ocho llamadas al solver: se ejecutaba una por candidato hasta que el noveno abortaba el barrido.
+
+La planificación ahora separa la admisión barata de candidatos del solver. Primero valida track físico y fresco, UUID/entidad, configuración del sensor, tipo, ownership/IFF/canEngage, aproximación, tolerancia y estado temporal; mantiene `MOTION.retain` para el conjunto autorizado. Luego ordena de forma determinista y limita a ocho antes de construir solver: menor tiempo de aproximación, menor distancia y UUID. El target anterior obtiene prioridad solo si sigue apareciendo en el conjunto elegible. `safePath`, incertidumbre al impacto, arco, reservas, lock y fuego nativo siguen siendo posteriores y obligatorios. El exceso real de 128 tracks inspeccionados continúa fallando cerrado.
+
+La regresión `CiwsCoordinationRegression` cubre snapshots de 1, 8, 9, 16, 64 y 128 candidatos; verifica top ocho en orden, independencia del orden de llegada, descarte del noveno sin borrar el conjunto anterior, retención condicional del target previo, rechazo de FRIEND/UNKNOWN y el guard de fuente que exige preselección antes del solver.
+
+### Auditoría independiente
+
+La revisión independiente encontró que la adquisición sigue viniendo de `IRadar.getTracks()` y que el coordinator conserva los gates de UUID reciente, entidad proyectil real, `sensorAllows`, owner/plataforma, ENEMY/`canEngage`, modelo temporal, solver, `safePath`/TrajectorySafety, reservas, lock vinculado al UUID y revalidación antes de `WeaponAdapters.fire`. La autorización no neutraliza por predicción. El contrato CBC `fireShot(...): void` y el resultado booleano del adapter describen despacho, no confirmación de proyectil o intercepción.
+
+### Resultado de validación Cycle 2L
+
+- `clean build --offline`: **BUILD SUCCESSFUL**, Java 21. Pasaron las 14 suites de regresión Java configuradas, incluida `ciwsCoordinationRegression`; la prueba `test` existente también pasó desde caché.
+- `Verify-CiwsCandidateBudget.ps1`: **26/26 assertions estáticas aprobadas**, incluyendo comprobación del bytecode del artefacto compilado. La suite cubre 1, 8, 9, 16, 64 y 128 candidatos, orden determinista independiente del orden del snapshot, retención condicional del objetivo previo, exclusión FRIEND/UNKNOWN y selección antes del solver.
+- **15/15 verificadores estáticos aprobados**: `Verify-Artifact.ps1`, `Verify-CIWS.ps1`, `Verify-CiwsCandidateBudget.ps1`, `Verify-CiwsCoordination.ps1`, `Verify-CIWSMotionPrediction.ps1`, `Verify-Geometry.ps1`, `Verify-GuidanceBytecode.ps1`, `Verify-MixinTargets.ps1`, `Verify-MultiblockMissileRadar.ps1`, `Verify-RadarAutomation.ps1`, `Verify-RadarSpearArea.ps1`, `Verify-RadarSpearArrowCollision.ps1`, `Verify-RadarSpearBytecode.ps1`, `Verify-SableBytecode.ps1` y `Verify-SableMountedSystems.ps1`.
+- `Verify-Artifact.ps1`: **108 clases Java 21**, 28 mixins registrados, sin clases o JARs de terceros embebidos. El verificador de mixin targets contrastó las clases contra los mods fijados y el artefacto NeoForge generado.
+- SHA-256 del artefacto binario de esta compilación: `5C2BF8DF279921DD7DC58E368DFE8640C3744BAEB2CF7D45C210DB5FACD0ECC5`. SHA-256 del source JAR: `FE30EBB65D776A61936106DD3E6966E1FA3F9D1DDE3D028435D86B10DF7A1468`.
+- `git diff --check`: aprobado. El script del paquete experimental pasó el análisis sintáctico de PowerShell.
+- No se ejecutaron Minecraft, cliente, servidor ni GameTest. No se modificó KxCraft ni se copiaron/instalaron JARs. La validación de runtime sigue pendiente.
+
+### Límites que siguen abiertos
+
+No se ejecutará Minecraft, cliente, servidor ni GameTest. El ciclo 2E sigue pendiente de evidencia de impacto; Radar Spear y CIWS reales siguen pendientes de runtime. Las capacidades montadas dentro de Sable siguen bloqueadas. La limitación de pistas contradictorias con UUID repetido se mantiene: el radar fijado usa una tabla por UUID y CMI conserva la primera observación autorizada, pero no detecta contradicciones de proveedores alternativos.
+
+El apartado 2K anterior registra el estado existente al cierre de ese ciclo. La reconciliación se publicó después mediante fast-forward al SHA `08aecb9c1f073b3f544c01a49d0819b09612f954`.

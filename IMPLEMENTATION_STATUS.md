@@ -2,6 +2,28 @@
 
 Esta tabla describe el código, no una prueba dentro de Minecraft. Compilación no demuestra aplicación correcta de mixins.
 
+## Ciclo 2L — auditoría final y paquete experimental
+
+Base de trabajo: reconciliación 2K en `08aecb9c1f073b3f544c01a49d0819b09612f954`, publicada mediante fast-forward en `main`. 2L no añade sistemas militares: corrige el tratamiento del presupuesto de candidatos CIWS y prepara un paquete local de revisión.
+
+En `CiwsCoordinator.plans()`, el límite de ocho se aplica después de filtrar tracks físicos, UUID/entidad viva, tipo, configuración del sensor, owner/plataforma, IFF, permiso, tendencia, confianza temporal y geometría finita. Los candidatos preseleccionados se ordenan antes del solver por menor tiempo de aproximación, menor distancia y UUID, conservando el target anterior solamente si sigue en el conjunto elegible. El solver procesa como máximo ocho candidatos; el noveno ya no descarta los planes anteriores ni limpia el historial por una saturación legítima. Más de 128 tracks inspeccionados o datos malformados mantienen rechazo fail-closed. Los planes todavía deben superar solver, incertidumbre, arco y `TrajectorySafety.clear` antes de entrar al lock/reserva/fuego.
+
+| Capacidad | Estado 2L |
+|---|---|
+| Presupuesto CIWS: hasta 8 candidatos elegibles tras filtrar | IMPLEMENTADO ESTÁTICAMENTE |
+| Límite de 128 tracks físicos y rechazo de datos inválidos | IMPLEMENTADO ESTÁTICAMENTE |
+| Radar físico, correlación, IFF, confianza y corredor seguro | IMPLEMENTADO ESTÁTICAMENTE; PENDIENTE DE VALIDACIÓN EN JUEGO |
+| Coordinación multi-CIWS y reservas | IMPLEMENTADO ESTÁTICAMENTE; PENDIENTE DE VALIDACIÓN EN JUEGO |
+| Predicción temporal CIWS y disparo nativo | CONDICIONADO a loadout/solución; PENDIENTE DE VALIDACIÓN EN JUEGO |
+| Detección de misiles multibloque Neo Warfare | IMPLEMENTADO ESTÁTICAMENTE; PENDIENTE DE VALIDACIÓN EN JUEGO |
+| Neutralización de proyectil por colisión real | CONDICIONADO a colisión; PENDIENTE DE VALIDACIÓN EN JUEGO |
+| Radar Spear manual y automático, impacto existente | IMPLEMENTADO ESTÁTICAMENTE; PENDIENTE DE VALIDACIÓN EN JUEGO |
+| Radar/CIWS/Radar Spear montados en Sable | BLOQUEADO |
+| Paquete experimental | PREPARADO LOCALMENTE PARA REVISIÓN; NO PUBLICADO |
+
+Limitación de UUID: Create: Radars 0.4.9.4 indexa su colección por UUID, de modo que su implementación fijada normalmente no expone duplicados. CMI deduplica por UUID antes del trabajo costoso y conserva la primera observación autorizada; no detecta ni reconcilia datos contradictorios si un proveedor alternativo entregara varias pistas para el mismo UUID.
+
+El paquete experimental se prepara solo en `build/distributions`; no se instala, etiqueta ni publica. Incluye el JAR y su source JAR, documentación, avisos, hashes y procedencia, sin dependencias externas. La validación de juego permanece pendiente.
 ## Ciclo 2K — coordinación local entre CIWS
 
 - Cada montura mantiene su propia fuente de adquisición `IRadar.getTracks()`. `CiwsCoordinationPolicy` deduplica y ordena los planes locales: conserva primero el blanco anterior si sigue en los planes, después menor tiempo de aproximación, distancia y UUID. El límite continúa en ocho candidatos; los planes y soluciones se calculan una vez y luego solo se prueban las reservas.
@@ -40,7 +62,7 @@ Esta tabla describe el código, no una prueba dentro de Minecraft. Compilación 
 ## Ciclo 2G — CIWS por radar físico
 
 - `/cmi ciwsradar <mount> <radar>` enlaza una montura compacta a un `StationaryRadarBlockEntity` o `RadarBearingBlockEntity` cargado, de la misma dimensión y con el mismo owner CMI. `/cmi ciws <mount> true|false` requiere propietario, radar, montura ensamblada y munición examinable. Ausencia de `cmiCIWS` conserva el coordinador general previo; `false` detiene la automatización CMI de esa montura y libera el lock/reserva, mientras el uso nativo/manual/redstone sigue como antes. Un marcador malformado falla cerrado.
-- `CiwsCoordinator` consulta solo `IRadar.getTracks()`. Antes de filtrar limita toda la colección a 128 entradas; limita a ocho candidatos elegibles para el solver y rechaza el barrido completo si excede un presupuesto. `PROJECTILE` se correlaciona por UUID canónico a una entidad viva real, se exige `CombatServices.projectile`, owner conocido, plataforma distinta de la propia, relación `ENEMY` y `canEngage`. No adquiere desde `CombatServices.contacts`, `getAllEntities` ni `Sensor.scan`.
+- `CiwsCoordinator` consulta solo `IRadar.getTracks()`. Antes de filtrar limita toda la colección a 128 entradas; desde 2L ordena los candidatos elegibles antes del solver y procesa como máximo ocho; un noveno candidato legítimo no descarta el lote, mientras más de 128 tracks inspeccionados continúa fallando cerrado. `PROJECTILE` se correlaciona por UUID canónico a una entidad viva real, se exige `CombatServices.projectile`, owner conocido, plataforma distinta de la propia, relación `ENEMY` y `canEngage`. No adquiere desde `CombatServices.contacts`, `getAllEntities` ni `Sensor.scan`.
 - Contrato Radars 0.4.9.4: `RadarTrack(Entity)` usa `entity.getUUID().toString()`, posición y velocidad de la entidad y `level.getGameTime()`; `updateRadarTracks` usa el mismo UUID como clave de `HashMap.compute` y su lambda crea o actualiza ese track. `trackExpiration` inicia en 100 ticks, es guardado/restaurado por el radar y puede configurarse; la limpieza elimina entidades muertas enseguida y tracks cuya antigüedad supera ese valor. Si una entidad sale de cobertura puede quedar en el mapa hasta caducar, pero CIWS solo acepta edad 0–1. La categoría `PROJECTILE` se asigna por el tag de proyectil antes del fallback `instanceof Projectile`; los tags anteriores de hostile/animal/mob prevalecen. La detección usa rango horizontal, límite vertical configurable y FOV angular configurable; el bytecode no aplica línea de visión. Los filtros/rangos son los del radar enlazado. El scanner actúa en `% 5 == 1`, y CIWS procesa `% 5 == 2`. El conjunto de entidades buscadas se actualiza en el barrido anterior.
 - Se exige velocidad finita no despreciable y componente radial entrante (`(posición - montura) · velocidad < 0`). El lock retiene el blanco que siga detectado, autorizado, con solución y corredor válidos; si cambia, selecciona menor tiempo de máxima aproximación, distancia y UUID. Requiere dos scans consecutivos distintos; un timestamp repetido o un salto de barrido no constituye lock. Los datos se vuelven a resolver antes de disparar. Los locks se limpian al reconstruir el block entity, perder el track o detener el servidor.
 - `FiringSolver` modela posición/velocidad actual y proyectil real con gravedad, drag, velocidad, distancia de salida y lifetime obtenidos del cañón/munición. Su `miss` es la distancia mínima de centros simulados; el umbral es el radio de la esfera inscrita en la AABB real del blanco (`nextDown(minDimension / 2)`), no un 0,25 fijo. Se verifican solución finita, tiempo, ángulos mecánicos y después se evalúa de nuevo el miss usando el cañón **actual**, no solo los ángulos escritos.
