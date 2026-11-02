@@ -380,6 +380,7 @@ La revisión independiente encontró que la adquisición sigue viniendo de `IRad
 - SHA-256 del artefacto binario de esta compilación: `5C2BF8DF279921DD7DC58E368DFE8640C3744BAEB2CF7D45C210DB5FACD0ECC5`. SHA-256 del source JAR: `FE30EBB65D776A61936106DD3E6966E1FA3F9D1DDE3D028435D86B10DF7A1468`.
 - `git diff --check`: aprobado. El script del paquete experimental pasó el análisis sintáctico de PowerShell.
 - No se ejecutaron Minecraft, cliente, servidor ni GameTest. No se modificó KxCraft ni se copiaron/instalaron JARs. La validación de runtime sigue pendiente.
+- Límite de cobertura: el top ocho se selecciona antes de solver y reservas. Si esos ocho no producen planes viables o sus reservas están ocupadas, el noveno no se intenta en ese barrido. Puede ser elegido en un barrido posterior si entra en el top ocho; si los mismos candidatos de mayor prioridad persisten, puede quedar postergado indefinidamente. Esto es una limitación de equidad/atención, no una relajación de seguridad.
 
 ### Límites que siguen abiertos
 
