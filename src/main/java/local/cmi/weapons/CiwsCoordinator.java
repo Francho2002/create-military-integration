@@ -14,7 +14,10 @@ import com.mrvew.firecontrol.control.ComputerFireControl;
 import com.mrvew.firecontrol.ship.Ships;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.WeakHashMap;
 import local.cmi.core.Actor;
@@ -41,6 +44,7 @@ import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.level.ChunkPos;
 import rbasamoyai.createbigcannons.cannon_control.contraption.PitchOrientedContraptionEntity;
 import riftyboi.cbcmodernwarfare.cannon_control.compact_mount.CompactCannonMountBlockEntity;
+import riftyboi.cbcmodernwarfare.munitions.contraptions.MunitionsPhysicsContraptionEntity;
 
 /** CIWS decisions are made only on the server thread from the linked physical radar's PROJECTILE tracks. */
 public final class CiwsCoordinator {
@@ -51,6 +55,7 @@ public final class CiwsCoordinator {
     private static final int MAX_TRACKS = 128, MAX_CANDIDATES = 8, MAX_FLIGHT_TICKS = 200;
     private static final ThreadLocal<FirePermit> FIRE_PERMIT = new ThreadLocal<>();
     private static final WeakHashMap<CompactCannonMountBlockEntity, Boolean> SEEN = new WeakHashMap<>();
+    private static final CiwsMotionTracker MOTION = new CiwsMotionTracker();
 
     private static final class FirePermit {
         final ServerLevel level;
@@ -61,7 +66,8 @@ public final class CiwsCoordinator {
     private record Binding(IRadar radar, String error) {}
     private record RadarSnapshot(List<RadarTrack> tracks, boolean scanProjectiles, boolean scanContraptions) {}
     private record Plan(MilitaryContact contact, Entity target, long scannedAt, double closestTime,
-                        double distanceSquared, double tolerance, FiringSolver solver, FiringSolver.Solution solution) {
+                        double distanceSquared, double tolerance, FiringSolver solver, FiringSolver.Solution solution,
+                        CiwsMotionTracker.History motionHistory, CiwsMotionPolicy.Assessment motionAssessment) {
         CiwsPolicy.Candidate candidate() { return new CiwsPolicy.Candidate(contact.id().uuid(), scannedAt, closestTime, distanceSquared); }
     }
 
@@ -92,6 +98,7 @@ public final class CiwsCoordinator {
         if (radarOwner.owner() == null || !actor.owner().equals(radarOwner.owner())) return "radar and mount must have the same known CMI owner";
         if (!running((IRadar)radarBe)) return "radar is stopped or unavailable";
         clearLock(level, mount);
+        MOTION.clearMount(level.dimension().location().toString(), mountPos.asLong());
         CompoundTag data = mount.getPersistentData();
         data.putString(RADAR_DIM, level.dimension().location().toString());
         data.putLong(RADAR_POS, radarPos.asLong());
@@ -144,6 +151,7 @@ public final class CiwsCoordinator {
 
     public static void setEnabled(ServerLevel level, CompactCannonMountBlockEntity mount, boolean enabled) {
         clearLock(level, mount);
+        MOTION.clearMount(level.dimension().location().toString(), mount.getBlockPos().asLong());
         CompoundTag data = mount.getPersistentData();
         data.putBoolean(MODE, enabled);
         data.remove(LAST_UPDATE); data.remove(LAST_FIRE); data.remove(HOLD);
@@ -153,6 +161,8 @@ public final class CiwsCoordinator {
     /** Disables a plot-mounted mode without treating the plot storage position as a world reservation key. */
     public static void disableNonExecutableMounted(CompactCannonMountBlockEntity mount) {
         mount.getPersistentData().putBoolean(MODE, false);
+        if (mount.getLevel() instanceof ServerLevel level)
+            MOTION.clearMount(level.dimension().location().toString(), mount.getBlockPos().asLong());
         mount.setChanged();
     }
 
@@ -164,20 +174,24 @@ public final class CiwsCoordinator {
             clearLock(level, mount);
             data.remove(LAST_UPDATE); data.remove(LAST_FIRE); data.remove(HOLD);
         }
-        if (!data.contains(MODE, Tag.TAG_BYTE) || !data.getBoolean(MODE)) { clearLock(level, mount); return; }
         long now = level.getGameTime();
+        String dimension = level.dimension().location().toString();
+        MOTION.prune(dimension, now);
+        if (!data.contains(MODE, Tag.TAG_BYTE) || !data.getBoolean(MODE)) {
+            clearLock(level, mount); MOTION.clearMount(dimension, mount.getBlockPos().asLong()); return;
+        }
         if (now % 5 != 2 || (data.contains(LAST_UPDATE, Tag.TAG_LONG) && data.getLong(LAST_UPDATE) == now)) return;
         data.putLong(LAST_UPDATE, now);
         Actor actor = CombatServices.actor(level, mount.getBlockPos());
         var cannon = WeaponAdapters.compactContraption(mount);
         Binding binding = binding(level, mount);
         if (!mainLevel(level, mount.getBlockPos()) || binding.error() != null || !baseReady(level, mount, cannon, actor)) {
-            clearLock(level, mount); return;
+            clearLock(level, mount); MOTION.clearMount(dimension, mount.getBlockPos().asLong()); return;
         }
         // Keep a fired round's reservation until its predicted arrival while the physical radar
         // still sees the same authorized incoming projectile, even during breech cooldown.
         if (data.contains(HOLD, Tag.TAG_LONG) && now <= data.getLong(HOLD)) {
-            if (!heldTargetStillValid(level, mount, actor, binding.radar(), now)) { clearLock(level, mount); data.remove(HOLD); return; }
+            if (!heldTargetStillValid(level, mount, actor, binding.radar(), now)) { clearLock(level, mount); MOTION.clearMount(dimension, mount.getBlockPos().asLong()); data.remove(HOLD); return; }
             UUID target = data.getUUID(RESERVED);
             int ttl = (int)Math.min(MAX_FLIGHT_TICKS + 2L, data.getLong(HOLD) - now + 1);
             if (!CombatServices.reserve(level, new TargetId(TargetId.Kind.ENTITY, target), reservationIdentity(level, mount), ttl)) clearLock(level, mount);
@@ -215,10 +229,13 @@ public final class CiwsCoordinator {
         // The barrel reported before setYaw/setPitch must itself have an acceptable simulated miss.
         FiringSolver.Approach actual = plan.solver().approach(aim.barrel());
         if (!CiwsPolicy.acceptableSolution(aim.barrel().isFinite(), true, actual.miss(), plan.tolerance(), actual.time(), shell.lifetimeTicks())) return;
+        if (plan.motionAssessment() != null && CiwsMotionPolicy.atImpact(plan.motionAssessment(), actual.time(), actual.miss(), plan.tolerance()) != plan.motionAssessment().model()) return;
         MilitaryContact current = CombatServices.resolve(level, plan.contact().id()).orElse(null);
         if (current == null || current.owner() == null || !current.projectile() || !plan.target().isAlive() ||
                 level.getEntity(selected.id()) != plan.target() || CombatServices.relation(level, actor, current) != Relation.ENEMY ||
                 !CombatServices.canEngage(level, actor, current) || !ready(level, mount, cannon, actor)) { clearLock(level, mount); return; }
+        if (!radarTrackStillCurrent(binding.radar(), plan.target(), selected.id(), plan.scannedAt(), now)) { clearLock(level, mount); return; }
+        if (!motionStillCurrent(plan, current)) { clearLock(level, mount); return; }
         // Check the whole finite lifetime, including a miss beyond the enemy projectile.
         if (!safePath(level, actor, cannon, plan.target(), pivot, plan.solver(), aim.barrel(), shell.lifetimeTicks())) return;
         if (!CombatServices.canEngage(level, actor, current) || !CombatServices.reserve(level, current.id(), identity, (int)Math.ceil(actual.time()) + 2)) return;
@@ -242,8 +259,17 @@ public final class CiwsCoordinator {
             PitchOrientedContraptionEntity cannon, Actor actor, IRadar radar,
             com.mrvew.firecontrol.ballistics.ShellModel shell, CannonProbe.Aim aim, Vec3 pivot, long now) {
         RadarSnapshot radarSnapshot = projectileTracks(radar);
-        if (radarSnapshot == null) return null;
+        if (radarSnapshot == null) {
+            MOTION.clearMount(level.dimension().location().toString(), mount.getBlockPos().asLong());
+            return null;
+        }
+        CiwsMotionTracker.Observer observer = motionObserver(level, mount, actor);
+        if (observer == null || !MOTION.beginObservation(observer, now)) {
+            MOTION.clearMount(level.dimension().location().toString(), mount.getBlockPos().asLong());
+            return null;
+        }
         List<Plan> result = new ArrayList<>();
+        Set<UUID> authorizedTracks = new HashSet<>();
         int eligible = 0;
         for (RadarTrack track : radarSnapshot.tracks()) {
             UUID id = CiwsPolicy.projectileId(track.trackCategory() == TrackCategory.PROJECTILE, track.id(), now, track.scannedTime());
@@ -251,8 +277,26 @@ public final class CiwsCoordinator {
             Entity target = level.getEntity(id);
             if (target == null || !target.isAlive() || !CombatServices.projectile(target) || !sensorAllows(radarSnapshot, target)) continue;
             var contact = CombatServices.resolve(level, new TargetId(TargetId.Kind.ENTITY, id)).orElse(null);
-            if (contact == null || !CiwsPolicy.eligible(target.isAlive(), contact.projectile(), actor.owner(), contact.owner(),
-                    actor.platform(), contact.platform(), CombatServices.relation(level, actor, contact), CombatServices.canEngage(level, actor, contact))) continue;
+            if (contact == null) { MOTION.invalidate(observer, id); continue; }
+            Relation relation = CombatServices.relation(level, actor, contact);
+            boolean canEngage = CombatServices.canEngage(level, actor, contact);
+            if (!CiwsPolicy.eligible(target.isAlive(), contact.projectile(), actor.owner(), contact.owner(),
+                    actor.platform(), contact.platform(), relation, canEngage)) { MOTION.invalidate(observer, id); continue; }
+            authorizedTracks.add(id);
+            CiwsMotionTracker.History motionHistory = null;
+            CiwsMotionPolicy.Assessment motionAssessment = null;
+            if (target instanceof MunitionsPhysicsContraptionEntity) {
+                var update = MOTION.observe(observer, id,
+                        new CiwsMotionTracker.Provenance(contact.owner(), contact.platform()), track.scannedTime(),
+                        Ships.v3(track.position()), Ships.v3(track.velocity()), now);
+                motionHistory = update.history();
+                if (motionHistory == null || update.result() == CiwsMotionTracker.Result.INVALID) continue;
+                motionAssessment = CiwsMotionPolicy.assess(motionHistory,
+                        CiwsPolicy.tolerance(contact.bounds().getXsize(), contact.bounds().getYsize(), contact.bounds().getZsize()));
+                if (motionAssessment.model() == CiwsMotionPolicy.Model.INVALID ||
+                        motionAssessment.model() == CiwsMotionPolicy.Model.INSUFFICIENT ||
+                        motionAssessment.model() == CiwsMotionPolicy.Model.UNRELIABLE) continue;
+            }
             Vec3 relative = contact.position().subtract(pivot), velocity = contact.velocity();
             if (!finite(relative) || !finite(velocity)) continue;
             double closest = CiwsPolicy.approaching(relative.x, relative.y, relative.z, velocity.x, velocity.y, velocity.z);
@@ -260,18 +304,21 @@ public final class CiwsCoordinator {
             var box = contact.bounds();
             double tolerance = CiwsPolicy.tolerance(box.getXsize(), box.getYsize(), box.getZsize());
             if (!Double.isFinite(closest) || !Double.isFinite(distance) || !Double.isFinite(tolerance)) continue;
-            if (!CiwsPolicy.withinBudget(++eligible, MAX_CANDIDATES)) return null;
-            TargetMotion motion = new TargetMotion(Ships.v3(contact.position()), Ships.v3(velocity), V3.ZERO);
+            if (!CiwsPolicy.withinBudget(++eligible, MAX_CANDIDATES)) { MOTION.clearMount(observer.dimension(), observer.mountPosition()); return null; }
+            V3 targetAcceleration = motionAssessment == null ? V3.ZERO : motionAssessment.acceleration();
+            TargetMotion motion = new TargetMotion(Ships.v3(contact.position()), Ships.v3(velocity), targetAcceleration);
             FiringSolver solver = new FiringSolver(shell, aim.pivot(), V3.ZERO, motion, 0, shell.lifetimeTicks());
             FiringSolver.Solution solution = solver.solve(FiringSolver.Arc.LOW, null, tolerance);
             if (solution == null || !solution.direction().isFinite()) continue;
+            if (motionAssessment != null && CiwsMotionPolicy.atImpact(motionAssessment, solution.flightTicks(), solution.miss(), tolerance) != motionAssessment.model()) continue;
             double[] angles = ComputerFireControl.mountAngles(Ships.vec(solution.direction()));
             boolean inArc = Double.isFinite(angles[0]) && Double.isFinite(angles[1]) && angles[1] <= cannon.maximumElevation() && angles[1] >= -cannon.maximumDepression();
             if (!CiwsPolicy.acceptableSolution(true, inArc, solution.miss(), tolerance, solution.flightTicks(), shell.lifetimeTicks())) continue;
             // Do not monopolize a contact with a predicted corridor that cannot be authorized.
             if (!safePath(level, actor, cannon, target, pivot, solver, solution.direction(), shell.lifetimeTicks())) continue;
-            result.add(new Plan(contact, target, track.scannedTime(), closest, distance, tolerance, solver, solution));
+            result.add(new Plan(contact, target, track.scannedTime(), closest, distance, tolerance, solver, solution, motionHistory, motionAssessment));
         }
+        MOTION.retain(observer, authorizedTracks);
         return result;
     }
 
@@ -323,6 +370,36 @@ public final class CiwsCoordinator {
     private static boolean sensorAllows(RadarSnapshot snapshot, Entity target) {
         return snapshot != null && target != null && CiwsPolicy.sensorAllows(snapshot.scanProjectiles(),
                 snapshot.scanContraptions(), target instanceof AbstractContraptionEntity);
+    }
+
+    private static boolean radarTrackStillCurrent(IRadar radar, Entity expected, UUID target, long scannedAt, long now) {
+        RadarSnapshot snapshot = projectileTracks(radar);
+        if (snapshot == null || expected == null || target == null || !expected.isAlive()) return false;
+        for (RadarTrack track : snapshot.tracks()) {
+            UUID id = CiwsPolicy.projectileId(track.trackCategory() == TrackCategory.PROJECTILE,
+                    track.id(), now, track.scannedTime());
+            if (target.equals(id) && scannedAt == track.scannedTime() && finite(track.position()) &&
+                    finite(track.velocity()) && sensorAllows(snapshot, expected)) return true;
+        }
+        return false;
+    }
+
+    private static CiwsMotionTracker.Observer motionObserver(ServerLevel level, CompactCannonMountBlockEntity mount, Actor actor) {
+        CompoundTag data = mount.getPersistentData();
+        String dimension = level.dimension().location().toString();
+        if (!actor.owner().equals(data.getUUID("cmiOwner")) || !data.contains(RADAR_POS, Tag.TAG_LONG) ||
+                !dimension.equals(data.getString(RADAR_DIM))) return null;
+        return new CiwsMotionTracker.Observer(dimension, mount.getBlockPos().asLong(), data.getLong(RADAR_POS),
+                actor.owner(), actor.platform());
+    }
+
+    private static boolean motionStillCurrent(Plan plan, MilitaryContact current) {
+        CiwsMotionTracker.History expected = plan.motionHistory();
+        if (expected == null) return plan.motionAssessment() == null;
+        CiwsMotionTracker.History actual = MOTION.history(expected.observer(), expected.target());
+        return expected.equals(actual) && current.owner() != null && current.owner().equals(expected.provenance().owner()) &&
+                Objects.equals(current.platform(), expected.provenance().platform()) &&
+                CiwsMotionPolicy.atImpact(plan.motionAssessment(), plan.solution().flightTicks(), plan.solution().miss(), plan.tolerance()) == plan.motionAssessment().model();
     }
 
     private static boolean safePath(ServerLevel level, Actor actor, PitchOrientedContraptionEntity cannon, Entity target,
@@ -412,5 +489,7 @@ public final class CiwsCoordinator {
         mount.setChanged();
     }
 
-    public static void clear() { SEEN.clear(); FIRE_PERMIT.remove(); }
+    public static void clearChunk(String dimension, ChunkPos chunk) { MOTION.clearChunk(dimension, chunk); }
+    public static void clearDimension(String dimension) { MOTION.clearDimension(dimension); }
+    public static void clear() { SEEN.clear(); FIRE_PERMIT.remove(); MOTION.clear(); }
 }

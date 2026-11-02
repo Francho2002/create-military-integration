@@ -286,3 +286,35 @@ Exigir `impact_confirmed` con el Sable correcto, `area_candidates` con más de u
 ### PENDIENTE DE VALIDACIÓN EN JUEGO
 
 No se inició Minecraft, cliente, servidor ni GameTest. La aplicación efectiva del tag al cargar datapacks y la detección/intercepción en partida siguen pendientes. No se cambiaron los JAR instalados en cliente o servidor.
+
+## Ciclo 2J — seguimiento temporal y predicción de maniobras CIWS
+
+### Evidencia del contrato Better Targeting 1.0.0.1
+
+`Verify-CIWSMotionPrediction.ps1` valida el SHA fijado y ejecuta `javap -p -c -s` sobre `TargetMotion`, `FiringSolver`, `Solution`, `Approach` y `V3`. El tercer componente del record se almacena en el campo `acceleration`; `TargetMotion.at(t)` lo multiplica por un factor temporal basado en `0.5 × min(t,30)^2 + 30 × max(0,t-30)`, componente por componente. Antes de 30 ticks, el resultado es `p + v·t + a·t²/2`; después el solver continúa con la velocidad equivalente a la aceleración acumulada al tick 30. El JAR no declara unidades en metadatos: el uso del tiempo del solver en ticks y la combinación vectorial con posición y velocidad implican bloques, bloques/tick y bloques/tick², respectivamente; las unidades se tratan como inferidas, no como una etiqueta explícita del bytecode.
+
+El bytecode de `solve` toma muestras con `TargetMotion.at`, y `finish` llama a `approach`, construyendo `Solution.intercept` desde el mismo estado temporal. `approach` compara cada paso de `ShellModel.step` con la posición temporal del objetivo. `path(direction,lifetime)` solo integra `ShellModel.step` para producir el corredor del proyectil disparado y no consulta ni sustituye la trayectoria real de la bala por la del blanco.
+
+### Implementación y regresiones
+
+`CiwsMotionTracker` recibe muestras únicamente después del track físico PROJECTILE, UUID resuelto, entidad real viva y autorización IFF. Mantiene como máximo tres muestras por blanco, exige timestamps de radar distintos y con delta exacto de cinco ticks, y guarda identidad del radar, montura, dimensión, UUID, owner/plataforma del tirador y procedencia actual del blanco. No almacena entidades ni niveles. Cambios de origen invalidan la historia; tracks que desaparecen se eliminan; límites de entradas, expiración, descarga de dimensión y descarga tanto del chunk de la montura como del radar limpian datos temporales.
+
+`CiwsMotionPolicy` estima aceleración desde velocidades consecutivas divididas por los ticks reales transcurridos. Dos barridos autorizan solo el solver lineal si la aceleración no modelada cabe en el margen restante; tres barridos permiten acceleration-vector prediction únicamente cuando el residuo de posición y la divergencia entre aceleraciones consecutivas caben en la tolerancia real de la AABB. Aplica `0.5 × errorDeAceleración × vuelo²` y descuenta el miss del solver. Un error que iguala/supera el margen, un salto de scan, datos inválidos o una maniobra incompatible inhiben el plan de disparo. La confianza observada no garantiza que la maniobra continúe igual durante el vuelo.
+
+Los proyectiles CBC ordinarios mantienen su plan de velocidad instantánea y el lock existente de dos barridos. Los misiles multibloque Neo Warfare requieren tres muestras para el modelo acelerado; antes de eso solo pueden usar lineal si el límite de error pasa. Justo antes del disparo se consulta de nuevo el radar físico y se exige el mismo UUID/timestamp reciente y filtros del sensor, junto con la revalidación de owner, plataforma, identidad e IFF. La pérdida de radar, owner, plataforma, identidad o ENEMY invalida la aprobación; no hay neutralización desde una predicción. La solución y el `approach` del cañón usan el mismo solver/TargetMotion, y el corredor evalúa el shell path.
+
+La regresión `CiwsMotionRegression` cubre: primera/misma/nueva muestra, delta omitido, timestamps futuros/retrocedidos, NaN/Inf, cambio de UUID/radar/owner/procedencia, aceleración en tres ejes, aceleración opuesta, historia acotada y limpieza al perder tracks, desactivar/montura o descargar el radar. También comprueba el límite de 30 ticks, confianza contra vuelo/miss/hitbox, lock CBC de dos barridos, IFF desconocido, ausencia de sensores globales, ausencia de spawn y neutralización predictivos y uso del mismo solver para aim y trayectoria.
+
+### Resultado del ciclo 2J
+
+Las capacidades de código que se cubren son seguimiento entre barridos, estimación vectorial, contraste de tendencia, incertidumbre geométrica y predicción acelerada acotada para `MunitionsPhysicsContraptionEntity`; la adquisición continúa gobernada por `IRadar.getTracks()`, y el firing nativo, IFF, reservas, filtros y `TrajectorySafety` no se relajan. No se modifican velocidades, gravedad, drag, daño, spread, vida útil, cooldown o colisión de los proyectiles.
+
+La validación de 2J es exclusivamente estática. Cualquier seguimiento y predicción real en juego, continuidad del track durante maniobras, orientación física, fuego, colisión e intercepción permanecen **PENDIENTES DE VALIDACIÓN EN JUEGO**. No iniciar Minecraft ni un servidor fue parte de las restricciones de este ciclo; no se modificaron JARs instalados.
+
+### Resultados ejecutados
+
+- `clean build --offline` con Java 21 y hashes de dependencias fijados: **BUILD SUCCESSFUL**. `check` ejecutó 13 regresiones Java: `guidanceModeRegression`, `managedGuidanceNbtRegression`, `geometryIntersectionRegression`, `radarSpearModeRegression`, `radarSpearImpactRegression`, `radarSpearStructuralRegression`, `radarSpearBlastGeometryRegression`, `shotContextRegression`, `shipOwnershipRegression`, `radarSpearLockRegression`, `ciwsPolicyRegression`, `mountedBlockReferenceRegression` y la nueva `ciwsMotionRegression`; todas pasaron.
+- Pasaron los 12 verificadores previos y el nuevo `Verify-CIWSMotionPrediction.ps1`: `Verify-Artifact.ps1`, `Verify-CIWS.ps1`, `Verify-Geometry.ps1`, `Verify-GuidanceBytecode.ps1`, `Verify-MixinTargets.ps1`, `Verify-MultiblockMissileRadar.ps1`, `Verify-RadarAutomation.ps1`, `Verify-RadarSpearArea.ps1`, `Verify-RadarSpearArrowCollision.ps1`, `Verify-RadarSpearBytecode.ps1`, `Verify-SableBytecode.ps1`, `Verify-SableMountedSystems.ps1` y `Verify-CIWSMotionPrediction.ps1`.
+- `git diff --check`: sin errores de whitespace; Git mostró únicamente su aviso normal de conversión CRLF→LF en `VALIDATION.md`.
+- SHA-256 del artefacto construido `build/libs/create-military-integration-0.1.0-dev.jar`: `3854175D7AD4AF7921466462BCA70E203237D30A863D5DCE8559F1A243D6FB4D`.
+- No se ejecutó Minecraft, cliente, servidor o GameTest. No se copiaron archivos a los perfiles ni al servidor. El build de desarrollo no acredita tejido efectivo de mixins ni intercepción runtime.

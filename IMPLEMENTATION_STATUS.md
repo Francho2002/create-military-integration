@@ -273,3 +273,32 @@ Se corrigió la ubicación del recurso al directorio singular `data/create_radar
 El filtro CIWS diferencia el tipo real después de resolver el UUID del track: `scanProjectiles` es obligatorio siempre; `scanContraptions` es adicional solo para entidades `AbstractContraptionEntity`. La misma política se aplica al adquirir candidatos y revalidar un lock/reserva. IFF, frescura, ownership, solución, corredor y disparo nativo no cambian. Validación runtime pendiente.
 
 **Validación estática 2I.1:** `clean build --offline` pasó con las 12 regresiones Java. Pasaron los 12 verificadores y `git diff --check`. El JAR contiene la etiqueta en la ruta singular y no contiene la ruta plural. SHA-256: `7C54267AFDF6402B57FA2CC87A975DD2C5A559559CFD154AE611BC57B1460C5F`. La comprobación de juego sigue pendiente; no se modificaron instalaciones activas.
+
+## Ciclo 2J — predicción de movimiento CIWS (implementación estática)
+
+El seguimiento avanzado se aplica solo a `MunitionsPhysicsContraptionEntity` que ya llegó como track PROJECTILE del `IRadar` enlazado y superó resolución UUID, entidad viva, identidad de proyectil, owner conocido, IFF ENEMY y `canEngage`. Los proyectiles CBC normales conservan la ruta lineal y el lock de dos barridos de 2G; no se exige una tercera muestra para ellos.
+
+`CiwsMotionTracker` conserva únicamente valores (dimensión, montura, radar, propietario/plataforma, UUID del blanco, procedencia, `scannedTime`, posición y velocidad), sin referencias a niveles o entidades. Cada muestra requiere un timestamp de barrido distinto, finito, no futuro y exactamente cinco ticks posterior al anterior. Dos registros con el mismo timestamp no incrementan la historia. Saltos, retrocesos, datos malformados, cambio de radar/owner/plataforma o pérdida de autorización reinician o eliminan la historia. La ventana es de tres muestras, el máximo 2.048 historiales, se retira lo que sale de los tracks actualmente autorizados y se purga por dimensión, chunk, montura, edad o parada del servidor.
+
+`CiwsMotionPolicy` calcula aceleración vectorial como `(v₂-v₁)/Δt` con Δt tomado de `RadarTrack.scannedTime()`; los tres ejes usan la misma fórmula en bloques/tick² inferidos del espacio de `TargetMotion`. Con dos barridos no se atribuye una aceleración estable: CMI conserva un solver lineal y solo admite el disparo si el error por la aceleración observada cabe en el margen real de impacto. Con tres, compara las dos aceleraciones consecutivas y el error de posición extrapolada; una divergencia que consume el margen de la hitbox clasifica la maniobra como UNRELIABLE y no produce plan de fuego.
+
+Bytecode del SHA fijado de Better Targeting 1.0.0.1 confirma que el tercer campo de `TargetMotion` se guarda como `acceleration`; `at(t)` calcula `p + v·t + a·B(t)` en X/Y/Z, con aceleración limitada al horizonte de 30 ticks y continuación posterior a velocidad constante equivalente. El solver usa `TargetMotion.at()` tanto al resolver el disparo como en `approach()`; `finish()` construye la solución a partir de ese mismo `approach` y su `intercept`. `path(direction,lifetime)` simula exclusivamente el proyectil CBC mediante `ShellModel.step`, no la posición del blanco. El bytecode no declara unidades textuales; los ticks discretos del solver y la suma dimensional de posición/velocidad/tiempo/aceleración respaldan las unidades de juego anteriores, que se describen como inferidas del contrato matemático.
+
+La estimación de incertidumbre se compara contra `CiwsPolicy.tolerance` derivada de la esfera inscrita en la AABB real y contra el miss del solver. CMI aplica `0.5 × incertidumbreAceleración × vuelo²` y descuenta el miss del margen. En movimiento lineal la magnitud de aceleración observada también cuenta como incertidumbre no modelada. En aceleración confirmada se usa el vector medido en el solver y la divergencia observada como incertidumbre. Esta tendencia no garantiza que el misil mantenga la maniobra durante el vuelo: un cambio posterior puede invalidar la predicción.
+
+El solver continúa siendo `FiringSolver.Arc.LOW` con física, vida útil y balística nativas del cañón; la misma instancia/modelo se usa para el `approach(aim.barrel())`, y el corredor sigue siendo la trayectoria del proyectil. Antes del fuego se vuelve a leer el track del radar vinculado y se exige el mismo UUID, timestamp reciente y filtros habilitados; también se revalidan entidad, owner, plataforma, relación, permiso, historial/procedencia idénticos, arco, solución, seguridad y reserva. El permiso scoped continúa siendo de un solo uso. El solver no crea, guía ni neutraliza munición. Si se pierde radar, entidad, ownership/IFF o historial, CMI limpia la autorización/lock; una maniobra abrupta o un error que supera el margen inhibe el disparo.
+
+| Capacidad | Estado |
+|---|---|
+| Seguimiento entre barridos | IMPLEMENTADO; solo tracks físicos autorizados, ventana de tres muestras y límites/limpieza explícitos. |
+| Estimación de aceleración | IMPLEMENTADO; diferencia vectorial de velocidades y timestamps reales. |
+| Confirmación de tendencia | IMPLEMENTADO; comparación de dos aceleraciones más residuo de posición. |
+| Evaluación de incertidumbre | IMPLEMENTADO; contra AABB real, miss del solver y vuelo previsto. |
+| Predicción acelerada | IMPLEMENTADO ESTÁTICAMENTE para tendencia estable, usando el modelo fijado; posible maniobra futura no queda garantizada. |
+| Solver nativo | IMPLEMENTADO; `FiringSolver` resuelve y `approach` valida con el mismo `TargetMotion`; el path es la trayectoria de la bala. |
+| Alineación actual | CONDICIONADO a orientación efectiva de la montura; se reevalúa su cañón real antes de fuego. |
+| Disparo CIWS | CONDICIONADO a balística/loadout soportado, lock, autorización, corredor y cooldown nativo. |
+| Intercepción de proyectil normal | CONDICIONADO a colisión real y hook existente; sin neutralización predictiva. |
+| Intercepción de contraption maniobrante | CONDICIONADO a tres barridos consistentes; giro brusco inhibe fuego. |
+
+No se introducen sensores, threads, predicción de impacto como neutralización, cambios de física, daños ni cambios en filtros radar. Sin trayectoria runtime observada, esta entrega no acredita interceptaciones en partida.
