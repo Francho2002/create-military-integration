@@ -119,4 +119,3 @@ if ($script:Failures.Count -gt 0) {
     exit 1
 }
 Write-Host 'OK: CIWS 2L candidate budget and safety gates verified statically.'
-
