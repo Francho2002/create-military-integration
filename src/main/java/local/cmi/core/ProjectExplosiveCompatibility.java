@@ -17,7 +17,9 @@ public final class ProjectExplosiveCompatibility {
         SMOKETRAIL,
         FIRE_TRAIL,
         MULTI_BLOCK,
-        UNKNOWN
+        UNKNOWN;
+
+        public boolean conventionalBomb() { return this == SMALL_BOMB || this == BIG_BOMB; }
     }
 
     public enum Role {
@@ -65,10 +67,22 @@ public final class ProjectExplosiveCompatibility {
         };
     }
 
+    public static boolean isProjectExplosiveRegistryId(String registryId) {
+        if (registryId == null) return false;
+        int separator = registryId.indexOf(':');
+        return separator > 0 && "projectexplosive".equals(registryId.substring(0, separator));
+    }
+
     public static Classification classify(Entity entity) {
         if (entity == null) return UNKNOWN;
         var id = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
         return id == null ? UNKNOWN : classifyRegistryId(id.toString());
+    }
+
+    public static boolean isProjectExplosive(Entity entity) {
+        if (entity == null) return false;
+        var id = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
+        return id != null && isProjectExplosiveRegistryId(id.toString());
     }
 
     /** Fail closed for every entity in this optional mod's namespace, including unlisted future IDs. */

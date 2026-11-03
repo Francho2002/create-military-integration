@@ -59,6 +59,89 @@ public final class ProjectExplosiveCompatibilityRegression {
         check(!ProjectExplosiveCompatibility.blocksAutomaticCiwsRegistryId("othermod:icbm"),
                 "another namespace is not misclassified as Project: Explosive");
 
+        for (String id : new String[] { "projectexplosive:small_bomb", "projectexplosive:big_bomb",
+                "projectexplosive:nuclear_bomb", "projectexplosive:icbm", "projectexplosive:unlisted_future_bomb" }) {
+            check(!NeutralizationPolicy.allows(id, true),
+                    "PE recognition/legacy projectile flag never grants neutralization: " + id);
+        }
+        check(NeutralizationPolicy.allows("createbigcannons:autocannon_bullet", true),
+                "legacy CBC projectile neutralization remains authorized by its existing recognition contract");
+        check(NeutralizationPolicy.allows("wariumce:radar_spear_missile_projectile", true),
+                "legacy Warium projectile neutralization remains authorized by its existing recognition contract");
+        check(!NeutralizationPolicy.allows("createbigcannons:autocannon_bullet", false),
+                "unrecognized legacy projectile remains non-neutralizable");
+        check(!NeutralizationPolicy.allows(null, true) && !NeutralizationPolicy.allows("broken-id", true),
+                "malformed registry identity fails closed for neutralization");
+
+        var ready = new ProjectExplosiveBombObservation.Evidence(ProjectExplosiveCompatibility.Kind.SMALL_BOMB,
+                true, true, true, true, true, true, Relation.ENEMY, false);
+        var futureCandidate = ProjectExplosiveBombObservation.assess(ready);
+        check(futureCandidate.futureEligible(), "fresh physical Mk 82 with verified owner and ENEMY IFF is a future review candidate");
+        check(!futureCandidate.acquisitionAuthorized() && !futureCandidate.neutralizationAuthorized(),
+                "future-candidate observation never authorizes acquisition or neutralization in PE-02A");
+        check(futureCandidate.rejection() == ProjectExplosiveBombObservation.Rejection.AWAITING_PE_02B_AUTHORIZATION,
+                "otherwise eligible bomb is explicitly held for later neutralization review");
+        var bigBomb = ProjectExplosiveBombObservation.assess(new ProjectExplosiveBombObservation.Evidence(
+                ProjectExplosiveCompatibility.Kind.BIG_BOMB, true, true, true, true, true, true, Relation.ENEMY, false));
+        check(bigBomb.futureEligible() && !bigBomb.neutralizationAuthorized(), "Mk 84 follows the same inert observation contract");
+
+        check(ProjectExplosiveBombObservation.assess(new ProjectExplosiveBombObservation.Evidence(
+                ProjectExplosiveCompatibility.Kind.SMALL_BOMB, true, true, true, false, false, true, Relation.UNKNOWN, false)).rejection()
+                == ProjectExplosiveBombObservation.Rejection.OWNER_UNKNOWN_OR_UNLOADED,
+                "absent or unloaded Projectile owner rejects observation eligibility");
+        check(ProjectExplosiveBombObservation.assess(new ProjectExplosiveBombObservation.Evidence(
+                ProjectExplosiveCompatibility.Kind.SMALL_BOMB, true, true, true, true, false, true, Relation.ENEMY, false)).rejection()
+                == ProjectExplosiveBombObservation.Rejection.OWNER_UNKNOWN_OR_UNLOADED,
+                "unresolved Projectile owner identity is rejected");
+        check(ProjectExplosiveBombObservation.assess(new ProjectExplosiveBombObservation.Evidence(
+                ProjectExplosiveCompatibility.Kind.SMALL_BOMB, true, true, true, true, true, false, Relation.UNKNOWN, false)).rejection()
+                == ProjectExplosiveBombObservation.Rejection.OBSERVER_OWNER_UNKNOWN,
+                "unowned observer cannot evaluate a hostile identity");
+        check(ProjectExplosiveBombObservation.assess(new ProjectExplosiveBombObservation.Evidence(
+                ProjectExplosiveCompatibility.Kind.SMALL_BOMB, true, true, true, true, true, true, Relation.FRIEND, false)).rejection()
+                == ProjectExplosiveBombObservation.Rejection.FRIEND,
+                "FRIEND prevails over an explicit hostile flag in observation policy");
+        check(ProjectExplosiveBombObservation.assess(new ProjectExplosiveBombObservation.Evidence(
+                ProjectExplosiveCompatibility.Kind.SMALL_BOMB, true, true, true, true, true, true, Relation.NEUTRAL, false)).rejection()
+                == ProjectExplosiveBombObservation.Rejection.NEUTRAL,
+                "NEUTRAL cannot become an observation candidate");
+        check(ProjectExplosiveBombObservation.assess(new ProjectExplosiveBombObservation.Evidence(
+                ProjectExplosiveCompatibility.Kind.SMALL_BOMB, true, true, true, true, true, true, Relation.UNKNOWN, false)).rejection()
+                == ProjectExplosiveBombObservation.Rejection.UNKNOWN_IFF,
+                "UNKNOWN cannot become an observation candidate");
+        check(ProjectExplosiveBombObservation.assess(new ProjectExplosiveBombObservation.Evidence(
+                ProjectExplosiveCompatibility.Kind.SMALL_BOMB, false, true, true, true, true, true, Relation.ENEMY, false)).rejection()
+                == ProjectExplosiveBombObservation.Rejection.TRACK_NOT_CURRENT,
+                "stale or absent physical radar track rejects the candidate");
+        check(ProjectExplosiveBombObservation.assess(new ProjectExplosiveBombObservation.Evidence(
+                ProjectExplosiveCompatibility.Kind.SMALL_BOMB, true, false, true, true, true, true, Relation.ENEMY, false)).rejection()
+                == ProjectExplosiveBombObservation.Rejection.ENTITY_NOT_LOADED_OR_ALIVE,
+                "unloaded entity cannot be correlated from a stale radar snapshot");
+        check(ProjectExplosiveBombObservation.assess(new ProjectExplosiveBombObservation.Evidence(
+                ProjectExplosiveCompatibility.Kind.SMALL_BOMB, true, true, false, true, true, true, Relation.ENEMY, false)).rejection()
+                == ProjectExplosiveBombObservation.Rejection.INVALID_TRACK_VECTOR,
+                "non-finite radar kinematics reject the candidate");
+        check(ProjectExplosiveBombObservation.assess(new ProjectExplosiveBombObservation.Evidence(
+                ProjectExplosiveCompatibility.Kind.NUCLEAR_BOMB, true, true, true, true, true, true, Relation.ENEMY, false)).rejection()
+                == ProjectExplosiveBombObservation.Rejection.NOT_CONVENTIONAL_BOMB,
+                "Fat Man/nuclear bombs remain outside the conventional candidate contract");
+        check(ProjectExplosiveBombObservation.assess(new ProjectExplosiveBombObservation.Evidence(
+                ProjectExplosiveCompatibility.Kind.ICBM, true, true, true, true, true, true, Relation.ENEMY, false)).rejection()
+                == ProjectExplosiveBombObservation.Rejection.NOT_CONVENTIONAL_BOMB,
+                "ICBM remains excluded from conventional candidate contract");
+        for (var kind : new ProjectExplosiveCompatibility.Kind[] { ProjectExplosiveCompatibility.Kind.ICBM_BOOSTER,
+                ProjectExplosiveCompatibility.Kind.SMOKETRAIL, ProjectExplosiveCompatibility.Kind.FIRE_TRAIL,
+                ProjectExplosiveCompatibility.Kind.MULTI_BLOCK, ProjectExplosiveCompatibility.Kind.FIRE_BOMB,
+                ProjectExplosiveCompatibility.Kind.UNKNOWN }) {
+            check(!ProjectExplosiveBombObservation.assess(new ProjectExplosiveBombObservation.Evidence(
+                    kind, true, true, true, true, true, true, Relation.ENEMY, false)).futureEligible(),
+                    "support, incendiary, or unknown PE kind stays excluded: " + kind);
+        }
+        check(ProjectExplosiveBombObservation.assess(new ProjectExplosiveBombObservation.Evidence(
+                ProjectExplosiveCompatibility.Kind.SMALL_BOMB, true, true, true, true, true, true, Relation.ENEMY, true)).rejection()
+                == ProjectExplosiveBombObservation.Rejection.PROTECTED,
+                "protected target rejects future eligibility");
+
         UUID shooter = UUID.fromString("00000000-0000-0000-0000-000000000001");
         UUID owner = UUID.fromString("00000000-0000-0000-0000-000000000002");
         for (Relation relation : new Relation[] { Relation.FRIEND, Relation.NEUTRAL, Relation.UNKNOWN }) {
@@ -69,12 +152,17 @@ public final class ProjectExplosiveCompatibilityRegression {
                 "owner null still cannot authorize fire");
         check(CiwsPolicy.eligible(true, true, shooter, owner, null, null, Relation.ENEMY, true),
                 "legacy generic ENEMY authorization policy remains unchanged");
+        check(ShipOwnership.ownerRelation(shooter, owner, true, true) == Relation.FRIEND,
+                "FRIEND remains stronger than explicit hostility in the existing IFF policy");
 
         String root = "src/main/java/local/cmi/";
         String compatibility = Files.readString(Path.of(root + "core/ProjectExplosiveCompatibility.java"));
+        String observation = Files.readString(Path.of(root + "core/ProjectExplosiveBombObservation.java"));
+        String neutralization = Files.readString(Path.of(root + "core/NeutralizationPolicy.java"));
         String coordinator = Files.readString(Path.of(root + "weapons/CiwsCoordinator.java"));
         String combat = Files.readString(Path.of(root + "core/CombatServices.java"));
         String interception = Files.readString(Path.of(root + "mixin/safety/CannonInterceptionMixin.java"));
+        String integration = Files.readString(Path.of("src/main/java/local/cmi/CreateMilitaryIntegration.java"));
         String gradle = Files.readString(Path.of("build.gradle"));
         check(!gradle.matches("(?is).*\\b(?:implementation|api|compileOnly|runtimeOnly)\\s+[^\\r\\n]*projectexplosive.*"),
                 "Project: Explosive is not a build dependency");
@@ -101,10 +189,25 @@ public final class ProjectExplosiveCompatibilityRegression {
                 compatibility.contains("public boolean neutralizable() { return false; }"),
                 "recognition is distinct from acquisition and neutralization");
         check(!combat.contains("projectexplosive:") && combat.contains("AbstractCannonProjectile") &&
-                combat.contains("wariumce:radar_spear_missile_projectile"),
-                "legacy CBC/Warium projectile recognition remains and PE was not added to the whitelist");
-        check(interception.contains("CombatServices.projectile(other)") && interception.contains("CombatServices.neutralize") &&
-                !interception.contains("projectexplosive:"), "real collision hook remains unchanged and PE is not neutralized by recognition");
+                combat.contains("wariumce:radar_spear_missile_projectile") && combat.contains("NeutralizationPolicy.allows(key.toString(),projectile(e))"),
+                "legacy CBC/Warium recognition is preserved and destructive permission is separately centralized");
+        check(combat.contains("!neutralizable(e)") && neutralization.contains("classifyRegistryId(registryId).neutralizable()"),
+                "central neutralize path requires explicit policy beyond recognition and IFF");
+        check(interception.contains("ProjectExplosiveCompatibility.isProjectExplosive(other)") &&
+                interception.contains("CombatServices.neutralizable(other)") && interception.contains("CombatServices.neutralize"),
+                "managed CBC collision cannot neutralize PE through recognition alone");
+        check(integration.contains("ProjectExplosiveCompatibility.isProjectExplosive(target)") &&
+                integration.contains("!CombatServices.neutralizable(target)"),
+                "managed explosion path excludes PE from both neutralization and vanilla entity damage");
+        check(observation.contains("radar.getTracks()") && observation.contains("level.getEntity(id)") &&
+                !observation.contains("CombatServices.contacts(") && !observation.contains("getAllEntities(") &&
+                !observation.contains("Sensor.scan("), "PE observations correlate only actual physical radar tracks");
+        check(observation.contains("RadarScanningFilterAccess)(Object)scanning).cmi$scanProjectiles()") &&
+                observation.contains("radar.isRunning()") && observation.contains("level.getBlockEntity(radar.getWorldPos()) != radar"),
+                "observation requires an active, loaded Create: Radars block with projectile scanning enabled");
+        check(observation.contains("new Decision(true, false, false, Rejection.AWAITING_PE_02B_AUTHORIZATION)") &&
+                observation.contains("false, relation, decision.futureEligible(), decision.acquisitionAuthorized()"),
+                "observation can mark a future review candidate without enabling acquisition or neutralization");
         System.out.println("OK: exact PE registry recognition is optional and observational; all PE CIWS acquisition and neutralization remain blocked");
     }
 }

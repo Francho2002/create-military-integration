@@ -39,6 +39,11 @@ public final class CombatServices {
         String type=net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(e.getType()).toString();
         return Set.of("wariumce:fire_spear_rocket_projectile","wariumce:radar_spear_missile_projectile","wariumce:seeker_spear_missile_projectile","wariumce:large_rocket","wariumce:cluster_rocket","wariumce:ir_missile").contains(type);
     }
+    /** Destructive permission is a separate policy from recognition and preserves the legacy whitelist. */
+    public static boolean neutralizable(Entity e){
+        if(e==null)return false;var key=net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(e.getType());
+        return key!=null&&NeutralizationPolicy.allows(key.toString(),projectile(e));
+    }
     private static MilitaryContact entity(ServerLevel l,Entity e){var a=actor(l,e);return new MilitaryContact(new TargetId(TargetId.Kind.ENTITY,e.getUUID()),e.getBoundingBox().getCenter(),e.getDeltaMovement(),e.getBoundingBox(),a.owner(),a.platform(),projectile(e),e instanceof LivingEntity&&!e.fireImmune(),l.getGameTime());}
     private static MilitaryContact ship(ServerLevel l,SubLevelAccess s){var b=s.boundingBox();var a=CmiData.get(l).ship(s.getUniqueId());return new MilitaryContact(new TargetId(TargetId.Kind.SABLE,s.getUniqueId()),Ships.boundsCenter(s),Ships.velocityAt(l,s,Ships.boundsCenter(s)),new AABB(b.minX(),b.minY(),b.minZ(),b.maxX(),b.maxY(),b.maxZ()),a==null?null:a.owner(),s.getUniqueId(),false,CmiData.get(l).hot(s.getUniqueId()),l.getGameTime());}
     public static List<MilitaryContact> contacts(ServerLevel l){server(l);var old=CACHE.get(l);if(old!=null&&l.getGameTime()-old.tick()<10)return old.contacts();var out=new ArrayList<MilitaryContact>();int budget=4096;for(var e:l.getAllEntities()){if(--budget<0)break;if(e.isAlive()&&(e instanceof LivingEntity||projectile(e)||e instanceof com.simibubi.create.content.contraptions.AbstractContraptionEntity))out.add(entity(l,e));}var c=SubLevelContainer.getContainer(l);if(c!=null)for(var s:c.getAllSubLevels()){if(!s.isRemoved())out.add(ship(l,s));}var list=List.copyOf(out);CACHE.put(l,new Snapshot(l.getGameTime(),list));return list;}
@@ -55,6 +60,6 @@ public final class CombatServices {
         var side=Iff.claim(l,Iff.Allegiance.of(l,a.owner(),"",List.of(),a.iff()==null?"":a.iff()),new net.minecraft.world.level.ChunkPos(BlockPos.containing(p)));return side==Iff.Side.FRIEND;}
     public static boolean reserve(ServerLevel l,TargetId threat,UUID interceptor,int ttl){server(l);return RESERVED.computeIfAbsent(l,k->new ReservationBook<>()).reserve(threat,interceptor,l.getGameTime(),ttl);}
     public static void release(ServerLevel l,TargetId threat,UUID interceptor){server(l);var m=RESERVED.get(l);if(m!=null)m.release(threat,interceptor);}
-    public static boolean neutralize(ServerLevel l,Actor actor,MilitaryContact contact){server(l);if(!contact.projectile()||!canEngage(l,actor,contact)||contact.id().kind()!=TargetId.Kind.ENTITY)return false;var e=l.getEntity(contact.id().uuid());if(e==null||!projectile(e))return false;e.discard();return true;}
+    public static boolean neutralize(ServerLevel l,Actor actor,MilitaryContact contact){server(l);if(!contact.projectile()||!canEngage(l,actor,contact)||contact.id().kind()!=TargetId.Kind.ENTITY)return false;var e=l.getEntity(contact.id().uuid());if(e==null||!neutralizable(e))return false;e.discard();return true;}
     public static void clear(){CACHE.clear();RESERVED.clear();}
 }

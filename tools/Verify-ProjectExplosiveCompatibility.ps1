@@ -32,9 +32,12 @@ function Listing([string]$Type) {
 }
 
 $adapter = ReadSource 'src/main/java/local/cmi/core/ProjectExplosiveCompatibility.java'
+$observation = ReadSource 'src/main/java/local/cmi/core/ProjectExplosiveBombObservation.java'
+$neutralization = ReadSource 'src/main/java/local/cmi/core/NeutralizationPolicy.java'
 $coordinator = ReadSource 'src/main/java/local/cmi/weapons/CiwsCoordinator.java'
 $combat = ReadSource 'src/main/java/local/cmi/core/CombatServices.java'
 $interception = ReadSource 'src/main/java/local/cmi/mixin/safety/CannonInterceptionMixin.java'
+$integration = ReadSource 'src/main/java/local/cmi/CreateMilitaryIntegration.java'
 $gradle = ReadSource 'build.gradle'
 $hashes = ReadSource 'dependency-hashes.properties'
 $regression = ReadSource 'src/test/java/local/cmi/core/ProjectExplosiveCompatibilityRegression.java'
@@ -69,8 +72,19 @@ Check ($coordinator.Contains('CombatServices.relation(level, actor, contact)') -
     $coordinator.Contains('TrajectorySafety.clear(') -and $coordinator.Contains('CombatServices.reserve(') -and
     $coordinator.Contains('WeaponAdapters.fire(')) 'IFF, trajectory, reservation and native-fire gates remain present'
 Check (!$combat.Contains('projectexplosive:') -and $combat.Contains('AbstractCannonProjectile') -and
-    $combat.Contains('wariumce:radar_spear_missile_projectile')) 'legacy CBC/Warium projectile recognition is preserved; no PE whitelist expansion'
-Check (!$interception.Contains('projectexplosive:') -and $interception.Contains('CombatServices.neutralize(')) 'collision neutralization hook has no PE-specific authority'
+    $combat.Contains('wariumce:radar_spear_missile_projectile') -and $combat.Contains('NeutralizationPolicy.allows(key.toString(),projectile(e))')) 'legacy CBC/Warium recognition is preserved and destructive permission is separately centralized'
+Check ($neutralization.Contains('classifyRegistryId(registryId).neutralizable()') -and $combat.Contains('!neutralizable(e)')) 'CombatServices.neutralize requires the independent neutralization policy'
+Check ($interception.Contains('ProjectExplosiveCompatibility.isProjectExplosive(other)') -and
+    $interception.Contains('CombatServices.neutralizable(other)') -and $interception.Contains('CombatServices.neutralize(')) 'managed physical collision cannot bypass PE neutralization denial'
+Check ($integration.Contains('ProjectExplosiveCompatibility.isProjectExplosive(target)') -and
+    $integration.Contains('!CombatServices.neutralizable(target)')) 'managed explosion excludes PE from neutralization and vanilla entity damage'
+Check ($observation.Contains('radar.getTracks()') -and $observation.Contains('level.getEntity(id)') -and
+    !$observation.Contains('CombatServices.contacts(') -and !$observation.Contains('getAllEntities(') -and
+    !$observation.Contains('Sensor.scan(')) 'read-only PE adapter correlates only physical radar tracks'
+Check ($observation.Contains('RadarScanningFilterAccess)(Object)scanning).cmi$scanProjectiles()') -and
+    $observation.Contains('radar.isRunning()') -and $observation.Contains('level.getBlockEntity(radar.getWorldPos()) != radar')) 'adapter requires active loaded physical radar and scanProjectiles filter'
+Check ($observation.Contains('new Decision(true, false, false, Rejection.AWAITING_PE_02B_AUTHORIZATION)') -and
+    $observation.Contains('decision.acquisitionAuthorized()') -and $observation.Contains('decision.neutralizationAuthorized()')) 'future eligibility never becomes acquisition or destructive permission'
 Check ($regression.Contains('owner null still cannot authorize fire') -and $regression.Contains('Relation.FRIEND') -and
     $regression.Contains('ICBM remains blocked for CIWS') -and $regression.Contains('projectexplosive:unknown')) 'regression covers identity, IFF and unknown PE IDs'
 
@@ -79,15 +93,31 @@ $archive = [System.IO.Compression.ZipFile]::OpenRead($artifactPath)
 try {
     $entries = @($archive.Entries | ForEach-Object FullName)
     Check ($entries -contains 'local/cmi/core/ProjectExplosiveCompatibility.class') 'compatibility classifier is in the compiled JAR'
+    Check ($entries -contains 'local/cmi/core/NeutralizationPolicy.class') 'central neutralization policy is in the compiled JAR'
+    Check ($entries -contains 'local/cmi/core/ProjectExplosiveBombObservation.class') 'read-only bomb observation adapter is in the compiled JAR'
     Check ($entries -contains 'local/cmi/weapons/CiwsCoordinator.class') 'guarded coordinator is in the compiled JAR'
     Check (@($entries | Where-Object { $_ -match '(^|/)projectexplosive/' }).Count -eq 0) 'JAR packages no Project: Explosive classes'
     Check (@($entries | Where-Object { $_ -match '\.jar$' }).Count -eq 0) 'JAR packages no dependency JARs'
 } finally { $archive.Dispose() }
 $adapterBytecode = Listing 'local.cmi.core.ProjectExplosiveCompatibility'
+$neutralizationBytecode = Listing 'local.cmi.core.NeutralizationPolicy'
+$observationBytecode = Listing 'local.cmi.core.ProjectExplosiveBombObservation'
+$combatBytecode = Listing 'local.cmi.core.CombatServices'
+$interceptionBytecode = Listing 'local.cmi.mixin.safety.CannonInterceptionMixin'
+$integrationBytecode = Listing 'local.cmi.CreateMilitaryIntegration'
 $coordinatorBytecode = Listing 'local.cmi.weapons.CiwsCoordinator'
 foreach ($id in $ids) { Check ($adapterBytecode.Contains($id)) "compiled classifier contains $id" }
 Check (($coordinatorBytecode.Split('ProjectExplosiveCompatibility.blocksAutomaticCiws').Count - 1) -ge 3) 'compiled CIWS bytecode contains acquisition, retention and fresh-track guards'
 Check (!$adapterBytecode.Contains('projectexplosive/')) 'compiled classifier has no symbolic PE class reference'
+Check ($neutralizationBytecode.Contains('ProjectExplosiveCompatibility.classifyRegistryId') -and
+    $neutralizationBytecode.Contains('Classification.neutralizable')) 'compiled central policy consults explicit PE neutralization permission'
+Check ($combatBytecode.Contains('CombatServices.neutralizable') -and $combatBytecode.Contains('NeutralizationPolicy.allows')) 'compiled CombatServices neutralize path uses separate policy'
+Check ($interceptionBytecode.Contains('ProjectExplosiveCompatibility.isProjectExplosive') -and
+    $interceptionBytecode.Contains('CombatServices.neutralizable')) 'compiled collision mixin contains explicit PE deny and central gate'
+Check ($integrationBytecode.Contains('ProjectExplosiveCompatibility.isProjectExplosive') -and
+    $integrationBytecode.Contains('CombatServices.neutralizable')) 'compiled explosion handler denies PE damage and uses central gate'
+Check ($observationBytecode.Contains('IRadar.getTracks') -and $observationBytecode.Contains('ServerLevel.getEntity') -and
+    !$observationBytecode.Contains('CombatServices.contacts') -and !$observationBytecode.Contains('ServerLevel.getAllEntities')) 'compiled observation path consumes physical radar snapshot and resolves only track UUIDs'
 
 Write-Host "Project Explosive compatibility verifier: $script:Passes passed; $($script:Failures.Count) failed."
 if ($script:Failures.Count -gt 0) { throw ($script:Failures -join "`n") }

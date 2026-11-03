@@ -386,3 +386,21 @@ En el ICBM, la decompilación muestra fases de vuelo y separación de un booster
 | Detección de booster y `multi_block` con filtros selectivos | BLOQUEADO por no ser `Projectile` y no entrar por `Projectile.class`; su presencia no crea candidato |
 | Colisión PE/CBC y cancelación segura de ojivas | BLOQUEADO hasta auditar detonación, efectos secundarios y procedencia |
 | Funcionamiento junto al mod PE en runtime | PENDIENTE DE VALIDACIÓN EN JUEGO |
+
+## CMI-PE-02A — procedencia de Mk 82/Mk 84 y permiso destructivo separado
+
+CMI observa Mk 82 (`projectexplosive:small_bomb`) y Mk 84 (`projectexplosive:big_bomb`) solo dentro de tracks PROJECTILE recientes de un radar físico Create: Radars. El adaptador informa el owner que `Projectile.getOwner()` logra resolver, relación IFF, protección y motivo de rechazo, pero no se conecta al selector CIWS y siempre deja `acquisitionAuthorized=false` y `neutralizationAuthorized=false`. El lanzamiento directo del ítem PE transmite al constructor el jugador mediante `Projectile.setOwner`; airstrike, comando, bloque activador y bombas hijas de ICBM usan rutas por coordenadas sin transferir owner en los call sites inspeccionados. El UUID base se serializa; si `getOwner()` no puede resolver la entidad, CMI mantiene UNKNOWN. La identidad resuelta no demuestra contexto de lanzamiento CMI ni permite distinguir por sí sola la ruta de creación.
+
+`NeutralizationPolicy` separa autorización destructiva de reconocimiento: los tipos PE consultan `Classification.neutralizable()` y el namespace PE completo falla cerrado; CBC/Warium no PE conserva el resultado de la whitelist anterior. `CombatServices.neutralize`, la intercepción CBC gestionada y las explosiones gestionadas consultan esa política. No se agregaron IDs PE a `CombatServices.projectile()` ni se alteró el CIWS. Los detalles y la certeza por ruta están en `PROJECT_EXPLOSIVE_PE_02A.md`.
+
+| Capacidad | Estado |
+|---|---|
+| Reconocer Mk 82/Mk 84 por ID exacto | IMPLEMENTADO |
+| Observar tracks del radar físico | IMPLEMENTADO ESTÁTICAMENTE; PENDIENTE DE VALIDACIÓN EN JUEGO |
+| Identificar owner en lanzamiento directo desde ítem | CONDICIONADO: `Projectile.getOwner()` debe resolverlo |
+| Owner de airstrike/comando/bloque/bomba hija ICBM | UNKNOWN en las rutas inspeccionadas |
+| Adquisición automática CIWS PE | BLOQUEADO |
+| Neutralización PE por colisión o explosión gestionada | BLOQUEADO |
+| Neutralización CBC/Warium existente | Conservada estáticamente; runtime pendiente |
+
+Validación PE-02A: `clean build --offline` aprobó con Java 21 y las 15 suites JavaExec; los 16 verificadores estáticos aprobaron; el JAR incluye la política y el adaptador sin empaquetar clases PE. SHA-256 del JAR binario: `93DC6BA5EB744A6C565A9C386BEADD12E88181A8C6F168917877BAE11C6B1CB9`. No se inició Minecraft, servidor, cliente ni GameTest. No hubo cambios de dependencia ni en instalaciones.
