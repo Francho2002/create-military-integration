@@ -447,3 +447,30 @@ Ningún resultado. No se inició Minecraft, cliente, servidor ni GameTest; no se
 - Aplicación runtime de los mixins opcionales PE y del hook CBC; track, adquisición IFF, disparo, colisión y callback reales.
 - Que `discard()` después de una colisión preimpacto evite todo efecto PE en runtime. El bytecode examinado muestra que `remove(DISCARDED)` no llama directamente a `onHit`, pero no acredita cancelar trabajos externos ya iniciados ni todos los efectos secundarios.
 - En consecuencia, la intercepción real permanece pendiente de validación en juego. La opción experimental está desactivada por defecto.
+
+## CMI-PE-02C — identidad y ciclo de vida del permiso convencional
+
+PE-02C endurece exclusivamente los permisos experimentales para Mk 82/Mk 84. El permiso guarda valores inmutables de dimensión, UUID de bomba, owner y plataforma resueltos al disparar, posición de montaje, identidad de instancia del radar físico, tipo/posición/owner/IFF/plataforma del radar, UUID de cañón y actor autorizado. No conserva referencias a entidad/mundo y no usa NBT como fuente de autoridad.
+
+La identidad del radar se asigna en memoria a la instancia cargada del block entity mediante una clave débil; se invalida al descargar su dimensión o chunk. Antes de aceptar el filtro CBC y otra vez en el callback geométrico, CMI re-resuelve la bomba y el owner, exige igualdad exacta con la identidad emitida, vuelve a leer el track del radar vinculado, confirma ENEMY, protección, estado preimpacto, montaje, actor y cañón. Un cambio de owner —incluso a otro owner también ENEMY—, plataforma, relación, radar, cañón, actor o dimensión revoca el permiso.
+
+La captura ocurre dentro de la llamada síncrona al firing nativo y solo una entidad elegible dentro de `ShotContext.managed()` puede recibir permiso. Todas las altas de proyectiles CBC observadas en ese ámbito se cuentan antes de validar metadatos: si aparece más de una, incluso una segunda sin metadatos CMI completos, se revoca cualquier permiso provisional. El permiso solo queda activo si el firing reporta éxito, hubo exactamente una alta CBC, la entidad quedó insertada y todas las revalidaciones siguen pasando. Rechazo, excepción o ambigüedad revoca el permiso. El callback consume el token antes de validar y puede neutralizar como máximo una vez.
+
+Permisos y tokens radar son temporales en memoria. Se limpian por descarga de dimensión/chunk, descarga/reload de la configuración de servidor y detención del servidor. La caducidad sigue limitada a 200 ticks. Las mixins de estado conservan targets exactos y `@Pseudo`; la ausencia de Project: Explosive está soportada por diseño estático. Solo se inspeccionó el contrato PE 0.7.2-beta fijado: otra versión con clases presentes pero nombres/descriptores incompatibles puede rechazar la aplicación del mixin; su comportamiento de arranque no se declara validado y queda fuera del contrato.
+
+El opt-in `experimental.projectExplosiveConventionalBombInterception` permanece OFF por defecto. No se habilitaron ICBM, bombas nucleares/incendiarias, boosters, estelas ni entidades desconocidas. CBC mantiene su geometría de barrido; los tiros CBC no gestionados conservan sus filtros y callbacks nativos.
+
+### Estado de PE-02C
+
+| Capacidad | Estado |
+|---|---|
+| Owner original ligado desde disparo hasta impacto | IMPLEMENTADO ESTÁTICAMENTE |
+| Identidad y procedencia del radar físico | IMPLEMENTADO ESTÁTICAMENTE; runtime pendiente |
+| Revalidación de actor, cañón, plataforma, dimensión e IFF | IMPLEMENTADO ESTÁTICAMENTE |
+| Spawn rechazado o múltiple | Fail-closed estático |
+| Descarga de chunks/dimensiones y reload del opt-in | Invalidación estática implementada |
+| Callback CBC de un solo uso | IMPLEMENTADO ESTÁTICAMENTE; colisión real pendiente |
+| Aplicación de mixins opcionales PE | PENDIENTE DE VALIDACIÓN EN JUEGO |
+| ICBM/nuclear/incendiaria/desconocidos | BLOQUEADO |
+
+Resultados de compilación, regresiones, verificadores y SHA-256 de artefactos: ver la entrada PE-02C en `VALIDATION.md`.

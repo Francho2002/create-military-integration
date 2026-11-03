@@ -139,6 +139,8 @@ $config = Source ($root + 'core/CmiConfig.java')
 $neutralization = Source ($root + 'core/NeutralizationPolicy.java')
 $observation = Source ($root + 'core/ProjectExplosiveBombObservation.java')
 $interception = Source ($root + 'core/ProjectExplosiveInterception.java')
+$permitPolicy = Source ($root + 'core/ProjectExplosivePermitPolicy.java')
+$integration = Source 'src/main/java/local/cmi/CreateMilitaryIntegration.java'
 $state = Source ($root + 'core/ProjectExplosiveBombState.java')
 $smallMixin = Source ($root + 'mixin/safety/ProjectExplosiveSmallBombStateMixin.java')
 $bigMixin = Source ($root + 'mixin/safety/ProjectExplosiveBigBombStateMixin.java')
@@ -162,12 +164,34 @@ Check ($state.Contains('cmi$impactPending() || cmi$detonationStarted()') -and
 Check ($smallMixin.Contains('@Pseudo') -and $smallMixin.Contains('@Accessor("l11oo0i1illii0o0liol1o1i")') -and
     $bigMixin.Contains('@Pseudo') -and $bigMixin.Contains('@Accessor("lii11l1iil010100loiio0li")') -and
     $mixinConfig.Contains('ProjectExplosiveSmallBombStateMixin') -and $mixinConfig.Contains('ProjectExplosiveBigBombStateMixin')) 'optional exact-version state bridges are pseudo mixins and registered'
+Check ($smallMixin.Contains('@Mixin(targets = "' + $smallType + '", remap = false)') -and
+    $bigMixin.Contains('@Mixin(targets = "' + $bigType + '", remap = false)') -and
+    $smallMixin.Contains('@Invoker("ll1ol00o111oioool0l011lo")') -and
+    $bigMixin.Contains('@Invoker("ll1ol00o111oioool0l011lo")')) 'both pseudo mixins target only the exact pinned PE classes and method names'
+Check ($smallPending.Contains('descriptor: Z') -and $bigPending.Contains('descriptor: Z') -and
+    $smallExploded.Contains('descriptor: ()Z') -and $bigExploded.Contains('descriptor: ()Z')) 'both invoker/accessor descriptors match the pinned boolean field and no-argument boolean method contracts'
+Check ($integration.Contains('ModConfigEvent.Reloading') -and $integration.Contains('ModConfigEvent.Unloading') -and
+    $integration.Contains('ProjectExplosiveInterception.clear()')) 'server configuration reload/unload clears all transient PE permits so OFF cannot be toggled back on to revive one'
 Check ($neutralization.Contains('allowsConventionalBombNeutralization') -and
     $neutralization.Contains('managedCbcShot') -and $neutralization.Contains('physicalCollisionConfirmed') -and
     $neutralization.Contains('oneUsePermitConsumed') -and $neutralization.Contains('impactOrDetonationStarted')) 'destruction policy separately requires current conventional gates, managed CBC shot, physical collision and consumed permit'
 Check ($interception.Contains('IMPACT_PERMITS.remove(interceptor)') -and
     $interception.Contains('onPhysicalCbcHit') -and $interception.Contains('target.discard()') -and
     $interception.Contains('authorizeCiwsTargetFromRadar')) 'one-use destructive action exists only in physical CBC callback after current radar revalidation'
+Check ($interception.Contains('pending.cannonProjectileSpawns++') -and
+    $interception.Contains('ProjectExplosivePermitPolicy.uniqueCbcSpawn(pending.cannonProjectileSpawns)') -and
+    $interception.IndexOf('pending.cannonProjectileSpawns++') -lt $interception.IndexOf('ShotContext.managed()') -and
+    $interception.Contains('!pending.ambiguous') -and $interception.Contains('level.getEntity(captured.getUUID()) == captured') -and
+    $interception.Contains('IMPACT_PERMITS.remove(pending.capturedProjectile)')) 'native rejection, no insertion, or multiple CBC entities cannot leave a usable permit'
+Check ($interception.Contains('authorization.contact().owner()') -and $interception.Contains('authorization.contact().platform()') -and
+    $interception.Contains('physicalRadar.instance()') -and $interception.Contains('authorization.relation().name()') -and
+    $interception.Contains('ProjectExplosivePermitPolicy.valid(issued, current')) 'permit freezes target owner/platform, exact radar instance, cannon, actor, dimension and ENEMY state; current identity is compared again'
+Check ($interception.Contains('permit.use.consume()') -and $interception.Contains('clearChunk(ResourceLocation dimension, ChunkPos chunk)') -and
+    $interception.Contains('cannonPosition') -and $interception.Contains('ProjectExplosiveBombObservation.clearRadarChunk')) 'callbacks are one-use and relevant chunk unload invalidates permit plus weak radar identity'
+Check ($permitPolicy.Contains('issued.equals(current)') -and $permitPolicy.Contains('now <= expiresAt') -and
+    $permitPolicy.Contains('class OneShot') -and $permitPolicy.Contains('boolean consumed')) 'pure permit policy requires exact identity, valid bounded time, and a single-use token'
+Check ($observation.Contains('WeakHashMap') -and $observation.Contains('physicalRadarIdentity') -and
+    $observation.Contains('clearRadarDimension') -and $observation.Contains('clearRadarInstances')) 'radar identity uses a weak block-entity key and retains value-only provenance'
 Check ($collisionMixin.Contains('ProjectExplosiveInterception.canHit(self,l,other)') -and
     $collisionMixin.Contains('ProjectExplosiveInterception.onPhysicalCbcHit(self,l,other)') -and
     $collisionMixin.Contains('cmiPeImpactConsumed')) 'CBC bypass is limited to managed shot permit, PE callback, and one-successful-hit suppression'
@@ -188,6 +212,8 @@ try {
     $entries = @($archive.Entries | ForEach-Object FullName)
     foreach ($entry in @('local/cmi/core/CmiConfig.class','local/cmi/core/ProjectExplosiveBombState.class',
             'local/cmi/core/ProjectExplosiveBombObservation.class','local/cmi/core/ProjectExplosiveInterception.class',
+            'local/cmi/core/ProjectExplosivePermitPolicy.class','local/cmi/core/ProjectExplosivePermitPolicy$Identity.class',
+            'local/cmi/core/ProjectExplosivePermitPolicy$OneShot.class',
             'local/cmi/mixin/safety/ProjectExplosiveSmallBombStateMixin.class',
             'local/cmi/mixin/safety/ProjectExplosiveBigBombStateMixin.class',
             'local/cmi/mixin/safety/CannonInterceptionMixin.class','local/cmi/weapons/CiwsCoordinator.class')) {
@@ -198,11 +224,24 @@ try {
 } finally { $archive.Dispose() }
 $observationBytecode = Listing $artifactPath 'local.cmi.core.ProjectExplosiveBombObservation'
 $interceptionBytecode = Listing $artifactPath 'local.cmi.core.ProjectExplosiveInterception'
+$permitPolicyBytecode = Listing $artifactPath 'local.cmi.core.ProjectExplosivePermitPolicy'
+$oneShotBytecode = Listing $artifactPath 'local.cmi.core.ProjectExplosivePermitPolicy$OneShot'
+$smallMixinBytecode = (& javap -p -v -classpath $artifactPath 'local.cmi.mixin.safety.ProjectExplosiveSmallBombStateMixin' 2>&1) -join "`n"
+$bigMixinBytecode = (& javap -p -v -classpath $artifactPath 'local.cmi.mixin.safety.ProjectExplosiveBigBombStateMixin' 2>&1) -join "`n"
+if ($LASTEXITCODE -ne 0) { throw 'javap could not inspect compiled optional PE pseudo mixins' }
 $hookBytecode = Listing $artifactPath 'local.cmi.mixin.safety.CannonInterceptionMixin'
 $ciwsBytecode = Listing $artifactPath 'local.cmi.weapons.CiwsCoordinator'
 Check ($observationBytecode.Contains('IRadar.getTracks') -and $observationBytecode.Contains('ServerLevel.getEntity')) 'compiled CMI observation still resolves only physical radar UUIDs'
 Check ($interceptionBytecode.Contains('ImpactPermit') -and $interceptionBytecode.Contains('onPhysicalCbcHit') -and
     $interceptionBytecode.Contains('NeutralizationPolicy.allowsConventionalBombNeutralization')) 'compiled one-use impact path invokes the independent destructive policy'
+Check ($permitPolicyBytecode.Contains('sameIdentity') -and $permitPolicyBytecode.Contains('valid') -and
+    $permitPolicyBytecode.Contains('uniqueCbcSpawn') -and $permitPolicyBytecode.Contains('long 200l') -and $oneShotBytecode.Contains('consume()') -and
+    $oneShotBytecode.Contains('consumed')) 'compiled artifact contains the exact-identity, bounded-lifetime and one-use permit policy'
+Check ($smallMixinBytecode.Contains('org.spongepowered.asm.mixin.Pseudo') -and
+    $smallMixinBytecode.Contains($smallType) -and $smallMixinBytecode.Contains('l11oo0i1illii0o0liol1o1i') -and
+    $smallMixinBytecode.Contains('ll1ol00o111oioool0l011lo') -and
+    $bigMixinBytecode.Contains('org.spongepowered.asm.mixin.Pseudo') -and $bigMixinBytecode.Contains($bigType) -and
+    $bigMixinBytecode.Contains('lii11l1iil010100loiio0li') -and $bigMixinBytecode.Contains('ll1ol00o111oioool0l011lo')) 'compiled pseudo mixins retain exact optional target/accessor/invoker metadata without class literals'
 Check ($hookBytecode.Contains('ProjectExplosiveInterception.canHit') -and
     $hookBytecode.Contains('ProjectExplosiveInterception.onPhysicalCbcHit')) 'compiled mixin exposes only the exact PE bridge around CBC filter/callback'
 Check (($ciwsBytecode.Split('ProjectExplosiveBombObservation.authorizeCiwsTrack').Count - 1) -ge 2 -and

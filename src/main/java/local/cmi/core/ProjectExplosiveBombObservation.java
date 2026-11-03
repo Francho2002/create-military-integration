@@ -9,7 +9,9 @@ import com.happysg.radar.block.radar.track.TrackCategory;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.WeakHashMap;
 import net.minecraft.core.BlockPos;
 import local.cmi.weapons.CiwsPolicy;
 import local.cmi.mixin.weapons.RadarScanningFilterAccess;
@@ -19,6 +21,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.projectile.Projectile;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -28,6 +31,8 @@ import net.minecraft.world.phys.Vec3;
  */
 public final class ProjectExplosiveBombObservation {
     private static final int MAX_TRACKS = 128;
+    // Weak keys avoid retaining unloaded radar block entities. Values contain no world/BE references.
+    private static final Map<net.minecraft.world.level.block.entity.BlockEntity, RadarInstance> RADAR_INSTANCES = new WeakHashMap<>();
 
     private ProjectExplosiveBombObservation() {}
 
@@ -63,10 +68,27 @@ public final class ProjectExplosiveBombObservation {
             boolean cmiLaunchContextVerified, Relation relation, boolean futureEligible,
             boolean acquisitionAuthorized, boolean neutralizationAuthorized, Rejection rejection) {}
 
+    /** Stable only for one loaded physical block-entity instance; it is never persisted. */
+    public record RadarIdentity(net.minecraft.resources.ResourceLocation dimension, BlockPos position,
+            String blockEntityType, UUID instance, Actor owner) {
+        public RadarIdentity {
+            position = position == null ? null : position.immutable();
+        }
+    }
+
+    private record RadarInstance(net.minecraft.resources.ResourceLocation dimension, BlockPos position,
+            String blockEntityType, UUID token) {}
+
     /** Current, fail-closed CIWS view backed by one physical PROJECTILE radar track. */
     public record Authorization(MilitaryContact contact, boolean playerOwnerVerified,
             boolean cmiLaunchContextVerified, boolean metadataConsistent, Relation relation, boolean protectedTarget,
-            boolean detonationStateKnown, boolean impactOrDetonationStarted, long trackScannedAt) {}
+            boolean detonationStateKnown, boolean impactOrDetonationStarted, long trackScannedAt,
+            RadarIdentity physicalRadar) {
+        public Authorization withPhysicalRadar(RadarIdentity radar) {
+            return new Authorization(contact, playerOwnerVerified, cmiLaunchContextVerified, metadataConsistent,
+                    relation, protectedTarget, detonationStateKnown, impactOrDetonationStarted, trackScannedAt, radar);
+        }
+    }
 
     /** Pure value form for testing duplicate physical tracks without constructing Minecraft entities. */
     public record TrackIdentity(String id, TrackCategory category, long scannedTime, Vec3 position, Vec3 velocity) {}
@@ -199,7 +221,7 @@ public final class ProjectExplosiveBombObservation {
             MilitaryContact ciwsContact = new MilitaryContact(base.id(), base.position(), base.velocity(), base.bounds(),
                     base.owner(), base.platform(), true, base.hot(), base.seenTick());
             return java.util.Optional.of(new Authorization(ciwsContact, true, false, metadataConsistent, relation,
-                    protectedTarget, true, impactOrDetonationStarted, track.scannedTime()));
+                    protectedTarget, true, impactOrDetonationStarted, track.scannedTime(), null));
         } catch (RuntimeException | LinkageError unavailableIdentity) {
             return java.util.Optional.empty();
         }
@@ -229,12 +251,65 @@ public final class ProjectExplosiveBombObservation {
                 if (matched != null && !sameTrackObservation(matched, track)) return java.util.Optional.empty();
                 matched = track;
             }
-            return matched == null || requiredScannedAt != Long.MIN_VALUE && requiredScannedAt != matched.scannedTime()
-                    ? java.util.Optional.empty() : authorizeCiwsTrack(level, observer, entity, matched, now, maximumAge);
+            if (matched == null || requiredScannedAt != Long.MIN_VALUE && requiredScannedAt != matched.scannedTime())
+                return java.util.Optional.empty();
+            Authorization authorization = authorizeCiwsTrack(level, observer, entity, matched, now, maximumAge).orElse(null);
+            if (authorization == null) return java.util.Optional.empty();
+            RadarIdentity identity = physicalRadarIdentity(level, radarPos, observer).orElse(null);
+            return identity == null || identity.owner().owner() == null ||
+                    !identity.owner().owner().equals(observer.owner()) ? java.util.Optional.empty() :
+                    java.util.Optional.of(authorization.withPhysicalRadar(identity));
         } catch (RuntimeException | LinkageError unavailableRadar) {
             return java.util.Optional.empty();
         }
     }
+
+    /** Captures the exact loaded radar instance and current CMI owner/platform identity as values. */
+    public static synchronized java.util.Optional<RadarIdentity> physicalRadarIdentity(ServerLevel level,
+            BlockPos radarPos, Actor expectedActor) {
+        if (level == null || radarPos == null || expectedActor == null || expectedActor.owner() == null ||
+                !level.getServer().isSameThread() || !level.hasChunkAt(radarPos)) return java.util.Optional.empty();
+        try {
+            var blockEntity = level.getBlockEntity(radarPos);
+            if (!(blockEntity instanceof IRadar radar) ||
+                    !(radar instanceof StationaryRadarBlockEntity) && !(radar instanceof RadarBearingBlockEntity) ||
+                    !(radar instanceof SmartBlockEntity) || radar.getWorldPos() == null ||
+                    !radar.getWorldPos().equals(radarPos) || blockEntity.getLevel() != level || !radar.isRunning())
+                return java.util.Optional.empty();
+            var type = BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(blockEntity.getType());
+            if (type == null) return java.util.Optional.empty();
+            Actor radarActor = CombatServices.actor(level, radarPos);
+            if (radarActor.owner() == null || !expectedActor.owner().equals(radarActor.owner()))
+                return java.util.Optional.empty();
+            var dimension = level.dimension().location();
+            BlockPos immutable = radarPos.immutable();
+            String typeId = type.toString();
+            RadarInstance instance = RADAR_INSTANCES.get(blockEntity);
+            if (instance == null || !instance.dimension().equals(dimension) ||
+                    !instance.position().equals(immutable) || !instance.blockEntityType().equals(typeId)) {
+                instance = new RadarInstance(dimension, immutable, typeId, UUID.randomUUID());
+                RADAR_INSTANCES.put(blockEntity, instance);
+            }
+            return java.util.Optional.of(new RadarIdentity(dimension, immutable, typeId, instance.token(), radarActor));
+        } catch (RuntimeException | LinkageError unavailableRadarIdentity) {
+            return java.util.Optional.empty();
+        }
+    }
+
+    public static synchronized void clearRadarDimension(net.minecraft.resources.ResourceLocation dimension) {
+        if (dimension != null) RADAR_INSTANCES.entrySet().removeIf(entry -> entry.getValue() == null ||
+                dimension.equals(entry.getValue().dimension()));
+    }
+
+    public static synchronized void clearRadarChunk(net.minecraft.resources.ResourceLocation dimension, ChunkPos chunk) {
+        if (dimension != null && chunk != null) RADAR_INSTANCES.entrySet().removeIf(entry -> {
+            RadarInstance instance = entry.getValue();
+            return instance == null || dimension.equals(instance.dimension()) &&
+                    new ChunkPos(instance.position()).equals(chunk);
+        });
+    }
+
+    public static synchronized void clearRadarInstances() { RADAR_INSTANCES.clear(); }
 
     /** Conflicting observations for one UUID are ambiguous and cannot seed PE acquisition. */
     public static boolean unambiguousPhysicalTrack(Collection<RadarTrack> tracks, RadarTrack expected) {

@@ -140,21 +140,48 @@ public final class ProjectExplosiveInterceptionRegression {
                 observation.contains("level.getEntity(ownerEntity.getUUID()) != ownerEntity") &&
                 observation.contains("cmi$impactOrDetonationStarted()") && observation.contains("metadataConsistent"),
                 "candidate requires current player owner, CMI metadata consistency, and readable pre-impact state");
-        check(observation.matches("(?s).*new Authorization\\(ciwsContact, true, false, metadataConsistent, relation,\\s+protectedTarget, true, impactOrDetonationStarted.*"),
+        check(observation.matches("(?s).*new Authorization\\(ciwsContact, true, false, metadataConsistent, relation,\\s+protectedTarget, true, impactOrDetonationStarted, track.scannedTime\\(\\), null\\).*"),
                 "resolved player identity is not misrepresented as a verified CMI launch context");
         check(smallState.contains("@Accessor(\"l11oo0i1illii0o0liol1o1i\")") &&
                 smallState.contains("@Invoker(\"ll1ol00o111oioool0l011lo\")"), "Mk 82 pending-impact and HasExploded state use exact optional accessors");
         check(bigState.contains("@Accessor(\"lii11l1iil010100loiio0li\")") &&
                 bigState.contains("@Invoker(\"ll1ol00o111oioool0l011lo\")"), "Mk 84 pending-impact and HasExploded state use exact optional accessors");
-        check(interceptor.contains("WeaponAdapters.fire") && interceptor.contains("pending.captured") &&
-                interceptor.contains("IMPACT_PERMITS.remove(interceptor)") && interceptor.contains("onPhysicalCbcHit"),
-                "only a real synchronous native managed CBC spawn creates a one-shot exact-target permit");
+        check(interceptor.contains("pending.captured") && interceptor.contains("pending.ambiguous") &&
+                interceptor.contains("pending.cannonProjectileSpawns++") &&
+                interceptor.contains("ProjectExplosivePermitPolicy.uniqueCbcSpawn(pending.cannonProjectileSpawns)") &&
+                interceptor.indexOf("pending.cannonProjectileSpawns++") < interceptor.indexOf("ShotContext.managed()") &&
+                interceptor.contains("level.getEntity(captured.getUUID()) == captured") &&
+                interceptor.contains("IMPACT_PERMITS.remove(pending.capturedProjectile)"),
+                "every CBC spawn is counted before eligibility; only one accepted live managed spawn retains a permit");
         check(interceptor.contains("target.discard()") && interceptor.contains("interceptor.discard()") &&
                 interceptor.contains("authorizeCiwsTargetFromRadar") && interceptor.contains("allowsConventionalBombNeutralization"),
                 "real CBC callback revalidates radar/IFF/state before discarding both entities");
         check(interceptor.contains("IMPACT_PERMITS.remove(interceptor)") &&
                 interceptor.contains("MAX_ACTIVE_PERMITS = 1024") && interceptor.contains("MAX_FLIGHT_TICKS = 200"),
                 "impact permit is one-use, bounded, and expires within the existing projectile lifetime budget");
+        String permitPolicy = Files.readString(Path.of(sourceRoot + "core/ProjectExplosivePermitPolicy.java"));
+        String integration = Files.readString(Path.of("src/main/java/local/cmi/CreateMilitaryIntegration.java"));
+        check(interceptor.contains("ProjectExplosivePermitPolicy.Identity") &&
+                interceptor.contains("authorization.contact().owner()") && interceptor.contains("physicalRadar.instance()") &&
+                interceptor.contains("authorization.contact().platform()") && interceptor.contains("permit.identity"),
+                "permit binds exact target owner/platform, physical radar instance, cannon, actor and dimension as immutable values");
+        check(interceptor.contains("currentAuthorization") && interceptor.contains("projectileOwner(target)") &&
+                interceptor.contains("authorization.relation() != Relation.ENEMY") &&
+                interceptor.contains("projectExplosiveShotBindingCurrent"),
+                "owner, IFF, radar, mount, cannon and actor are revalidated before filter and physical impact");
+        check(permitPolicy.contains("issued.equals(current)") && permitPolicy.contains("expiresAt >= issuedAt") &&
+                permitPolicy.contains("now <= expiresAt") && permitPolicy.contains("class OneShot") &&
+                interceptor.contains("permit.use.consume()"),
+                "identity equality, monotonic expiry and single-use callback are enforced by pure policy and runtime path");
+        check(interceptor.contains("clearChunk(ResourceLocation dimension, ChunkPos chunk)") &&
+                interceptor.contains("cannonPosition") && integration.contains("ProjectExplosiveInterception.clearChunk"),
+                "dimension/chunk unload clears permits for radar, mount, cannon, target and interceptor");
+        check(integration.contains("ModConfigEvent.Reloading") && integration.contains("ModConfigEvent.Unloading") &&
+                integration.contains("ProjectExplosiveInterception.clear()"),
+                "server config reload or unload permanently invalidates in-flight permits");
+        check(interceptor.contains("ThreadLocal<PendingShot>") && interceptor.contains("ShotContext.managed()") &&
+                interceptor.contains("sameActor(pending.actor, contextActor)"),
+                "permit capture is scoped to managed server-thread CBC spawn with the exact actor");
         check(hook.contains("ProjectExplosiveInterception.canHit(self,l,other)") &&
                 hook.contains("ProjectExplosiveInterception.onPhysicalCbcHit(self,l,other)") &&
                 hook.contains("cmiPeImpactConsumed"), "CBC filter is narrow and later collected callbacks are suppressed after one successful PE hit");

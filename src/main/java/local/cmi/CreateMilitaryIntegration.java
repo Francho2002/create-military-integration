@@ -13,6 +13,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.ModLoadingContext;
 import net.neoforged.fml.config.ModConfig;
+import net.neoforged.fml.event.config.ModConfigEvent;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.server.ServerStoppedEvent;
@@ -22,7 +23,9 @@ import net.neoforged.neoforge.event.level.LevelEvent;
 @Mod(CreateMilitaryIntegration.ID)
 public final class CreateMilitaryIntegration {
     public static final String ID="create_military_integration";
-    public CreateMilitaryIntegration(){ModLoadingContext.get().getActiveContainer().registerConfig(ModConfig.Type.SERVER,CmiConfig.SERVER_SPEC);NeoForge.EVENT_BUS.addListener(this::commands);NeoForge.EVENT_BUS.addListener(this::stopped);NeoForge.EVENT_BUS.addListener(this::spawned);NeoForge.EVENT_BUS.addListener(this::explosion);NeoForge.EVENT_BUS.addListener(this::levelUnloaded);NeoForge.EVENT_BUS.addListener(this::chunkUnloaded);}
+    public CreateMilitaryIntegration(){var container=ModLoadingContext.get().getActiveContainer();container.registerConfig(ModConfig.Type.SERVER,CmiConfig.SERVER_SPEC);container.getEventBus().addListener(this::configReloading);container.getEventBus().addListener(this::configUnloading);NeoForge.EVENT_BUS.addListener(this::commands);NeoForge.EVENT_BUS.addListener(this::stopped);NeoForge.EVENT_BUS.addListener(this::spawned);NeoForge.EVENT_BUS.addListener(this::explosion);NeoForge.EVENT_BUS.addListener(this::levelUnloaded);NeoForge.EVENT_BUS.addListener(this::chunkUnloaded);}
+    private void configReloading(ModConfigEvent.Reloading event){if(CreateMilitaryIntegration.ID.equals(event.getConfig().getModId())&&event.getConfig().getType()==ModConfig.Type.SERVER)ProjectExplosiveInterception.clear();}
+    private void configUnloading(ModConfigEvent.Unloading event){if(CreateMilitaryIntegration.ID.equals(event.getConfig().getModId())&&event.getConfig().getType()==ModConfig.Type.SERVER)ProjectExplosiveInterception.clear();}
     private void explosion(net.neoforged.neoforge.event.level.ExplosionEvent.Detonate event){
         if(!(event.getLevel() instanceof net.minecraft.server.level.ServerLevel level))return;
         var source=event.getExplosion().getDirectSourceEntity();if(source==null||!CombatServices.projectile(source)||!(source.getPersistentData().getBoolean("cmiManagedShot")||source.getPersistentData().getBoolean("cmiManaged")))return;
@@ -47,7 +50,7 @@ public final class CreateMilitaryIntegration {
         if(event.getLevel() instanceof ServerLevel level){local.cmi.weapons.CiwsCoordinator.clearDimension(level.dimension().location().toString());ProjectExplosiveInterception.clearDimension(level.dimension().location());}
     }
     private void chunkUnloaded(ChunkEvent.Unload event){
-        if(event.getLevel() instanceof ServerLevel level)local.cmi.weapons.CiwsCoordinator.clearChunk(level.dimension().location().toString(),event.getChunk().getPos());
+        if(event.getLevel() instanceof ServerLevel level){local.cmi.weapons.CiwsCoordinator.clearChunk(level.dimension().location().toString(),event.getChunk().getPos());ProjectExplosiveInterception.clearChunk(level.dimension().location(),event.getChunk().getPos());}
     }
     private static List<? extends SubLevelAccess> loadedShips(ServerLevel level){
         var container=SubLevelContainer.getContainer(level);

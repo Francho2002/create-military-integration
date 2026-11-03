@@ -467,3 +467,25 @@ Ninguno. No se ejecutaron Minecraft, cliente, servidor ni GameTest; no se afirma
 - Track físico real, IFF, disparo CBC, intersección geométrica y callback observado.
 - Ausencia runtime de explosión PE secundaria o trabajo diferido tras `discard()`. El bytecode confirma que `remove(DISCARDED)` no llama directamente a `onHit`, pero no prueba la cancelación de efectos externos ya iniciados.
 - La opción `experimental.projectExplosiveConventionalBombInterception` sigue **OFF**; la neutralización real permanece pendiente de validación en juego.
+
+## CMI-PE-02C — endurecimiento de identidad y ciclo de vida del permiso
+
+Base inspeccionada: `29dc2a85021b323992cf56939e29e241be953397`. El permiso temporal congela el UUID de bomba y su propietario original, plataforma, dimensión, mount, identidad de instancia/tipo/posición/owner/IFF/plataforma del radar físico, cañón y actor autorizado. Antes del filtro de colisión y otra vez en el callback CBC se vuelve a resolver la identidad completa; un cambio de owner invalida el permiso aunque ambos owners sigan siendo ENEMY. El token vive solo en memoria, expira en un máximo de 200 ticks, se consume antes del callback destructivo y se invalida al descargar dimensión/chunk, detener servidor o recargar/descargar la configuración de servidor.
+
+La captura del disparo ocurre en la ventana síncrona del firing nativo. Todas las altas CBC observadas en ese ámbito se cuentan antes de revisar metadatos; cero altas, una alta no elegible, un spawn rechazado/no insertado, error nativo o varias altas no producen permiso utilizable. CBC conserva su AABB barrida y la colisión geométrica; solo `onHitEntity` aceptado puede consumir el permiso. Un permiso ausente, expirado, consumido, de otra bomba o con identidad/IFF/protección/estado PE no válido falla cerrado. El opt-in server-side sigue OFF.
+
+### ACREDITADO ESTÁTICAMENTE
+
+- `gradlew.bat clean build --offline -PmodpackDir="C:\Users\panch\OneDrive\Desktop\KxCraft\server\mods" -PcandidatesDir="C:\Users\panch\OneDrive\Desktop\KxCraft\_desechos\_descompiled\mods"`: **BUILD SUCCESSFUL**, Java 21; pasaron las **17 suites JavaExec**, incluidas `projectExplosivePermitRegression` y la regresión PE de intercepción ampliada.
+- Pasaron los **17 verificadores estáticos**: `Verify-Artifact`, `Verify-CIWS`, `Verify-CiwsCandidateBudget`, `Verify-CiwsCoordination`, `Verify-CIWSMotionPrediction`, `Verify-Geometry`, `Verify-GuidanceBytecode`, `Verify-MixinTargets`, `Verify-MultiblockMissileRadar`, `Verify-ProjectExplosiveCompatibility` (53 comprobaciones), `Verify-ProjectExplosiveInterception` (**66 comprobaciones**), `Verify-RadarAutomation`, `Verify-RadarSpearArea`, `Verify-RadarSpearArrowCollision`, `Verify-RadarSpearBytecode`, `Verify-SableBytecode` y `Verify-SableMountedSystems`.
+- `git diff --check`: aprobado. JAR binario `build/libs/create-military-integration-0.1.0-dev.jar`: SHA-256 `7C72D6A6D83FC5E1D09CEADB156D614A62CE32CADF46C0C19569E8C4EE8D7425`. JAR de fuentes: SHA-256 `4A1EC855B0FB144EAC2D7C26C186CCD3AAA7F34BC126276625D8C0A20976B5FA`. El verificador de artefacto confirmó 133 clases Java 21 y 30 mixins registrados; el JAR no contiene clases PE ni JARs de terceros.
+- Las dos mixins opcionales `@Pseudo` conservan targets, accessors e invokers cotejados con Project: Explosive 0.7.2-beta. La ausencia de PE está soportada estructuralmente. La aplicación efectiva de mixins y otra versión con nombres/descriptores distintos no están acreditadas hasta runtime.
+
+### ACREDITADO EN JUEGO
+
+Ninguno. No se inició Minecraft, cliente, servidor ni GameTest; no se instaló el artefacto ni se activó el opt-in. La adquisición real, aplicación de mixins, colisión CBC, callback y consecuencias posteriores de `discard()` continúan **PENDIENTES DE VALIDACIÓN EN JUEGO**. No se afirma neutralización funcional acreditada.
+
+### PENDIENTE
+
+- Confirmar en runtime que los pseudo-mixins se aplican con PE ausente/presente y que el callback CBC real no inicia efectos secundarios posteriores.
+- Validar una colisión física Mk 82/Mk 84 en un entorno dedicado antes de considerar la función experimental apta para uso. El opt-in permanece OFF y no hubo despliegue en KxCraft.
