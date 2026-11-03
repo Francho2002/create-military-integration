@@ -404,3 +404,46 @@ CMI observa Mk 82 (`projectexplosive:small_bomb`) y Mk 84 (`projectexplosive:big
 | Neutralización CBC/Warium existente | Conservada estáticamente; runtime pendiente |
 
 Validación PE-02A: `clean build --offline` aprobó con Java 21 y las 15 suites JavaExec; los 16 verificadores estáticos aprobaron; el JAR incluye la política y el adaptador sin empaquetar clases PE. SHA-256 del JAR binario: `93DC6BA5EB744A6C565A9C386BEADD12E88181A8C6F168917877BAE11C6B1CB9`. No se inició Minecraft, servidor, cliente ni GameTest. No hubo cambios de dependencia ni en instalaciones.
+
+## CMI-PE-02B — intercepción física experimental Mk 82 / Mk 84
+
+Base: `aa4745469e253f58cf13a559854d2bd6bb93c559`. El alcance se limita a `projectexplosive:small_bomb` y `projectexplosive:big_bomb`; ICBM, nuclear/Fat Man, bombas incendiarias, boosters, humo, trails, debris e IDs PE desconocidos continúan bloqueados.
+
+### Implementación estática
+
+- La política separa adquisición y destrucción. La ruta genérica `CombatServices.projectile()`/`CombatServices.neutralize()` no admite PE. Mk 82/Mk 84 solo entran por gates específicos: ID exacto, track PROJECTILE actual del radar físico, UUID que resuelve a la misma entidad viva, `Projectile.getOwner()` que resuelve a un `Player` en el mismo `ServerLevel`, metadatos CMI sin contradicciones, relación ENEMY, `canEngage`, zona no protegida y estado PE legible previo a impacto/detonación. `cmiLaunchContextVerified=false`: owner resuelto no demuestra qué ruta de Project: Explosive creó la bomba.
+- La configuración de servidor `experimental.projectExplosiveConventionalBombInterception` tiene valor predeterminado `false`; también queda inerte si PE no está cargado. No fue habilitada en ninguna instalación.
+- El adaptador usa exclusivamente `IRadar.getTracks()` y rechaza tracks, UUIDs o categorías ambiguas. Relee y reautoriza antes del fuego y en el callback CBC real.
+- CBC 5.11.7 obtiene candidatos con `Level.getEntities(self, sweptAABB)`, llama `canHitEntity`, valida intersección AABB o recorte del segmento, acumula los impactos y luego invoca `onHitEntity`. El filtro nativo llama `Projectile.canHitEntity()` y rechaza toda entidad `Projectile`, incluidas las bombas PE `ThrowableProjectile`. El hook CMI sustituye ese rechazo solo para un tiro CBC gestionado con permiso de un solo uso ligado a un UUID Mk 82/Mk 84; CBC conserva su conjunto de candidatos y su geometría de impacto real. Para tiros sin `cmiManagedShot`, el hook devuelve el control a CBC sin cambiar su filtro/callback nativo. El disparo usa `WeaponAdapters.fire()` y la creación del permiso requiere un CBC real visto durante el contexto gestionado.
+- El callback repite radar, owner, IFF, protección, estado PE, cañón y vínculo; consume el permiso antes de validar. El flag `cmiPeImpactConsumed` impide una segunda neutralización cuando CBC ya había recolectado más candidatos en la misma pasada. El permiso tiene límite de cantidad y caduca dentro de 200 ticks.
+- Bytecode PE exacto: ambas bombas tienen un estado privado de impacto que `onHit` activa antes de continuar la detonación y un método `HasExploded` que consulta el estado autoritativo. Los accessors/invokers `@Pseudo` leen ambos estados. Estado inaccesible o desconocido, impacto pendiente o detonación iniciada rechaza la acción.
+- `remove(DISCARDED)` revisado limpia metadatos/tickets y llama a `ThrowableProjectile.remove`; no llama directamente a `onHit`. Esto no acredita cancelación de trabajos externos ya iniciados: por ello CMI no acepta bombas con el estado de impacto/detonación activado y no ejecuta callbacks de PE.
+- Las dos bombas heredan `ThrowableProjectile` y su bytecode fija gravedad `0.1f`. CIWS las somete al historial de movimiento 2J y exige una tendencia medida compatible con la hitbox real antes de producir plan de disparo. No se cambió el solver ni la física de munición.
+- Se conserva la autorización IFF, la seguridad de trayectoria, las reservas y los límites CIWS existentes. No se usa predicción como neutralización.
+
+| Capacidad | Estado |
+|---|---|
+| Reconocimiento Registry ID Mk 82/Mk 84 | IMPLEMENTADO |
+| Adquisición por radar físico, owner e IFF | IMPLEMENTADO estáticamente; opt-in servidor OFF |
+| Lectura del estado previo a detonación | IMPLEMENTADO estáticamente para el JAR PE fijado; PENDIENTE DE VALIDACIÓN EN JUEGO |
+| Camino CBC candidato → geometría → callback | IMPLEMENTADO estáticamente; PENDIENTE DE VALIDACIÓN EN JUEGO |
+| Neutralización solo por colisión CBC real | IMPLEMENTADO estáticamente, opt-in OFF; PENDIENTE DE VALIDACIÓN EN JUEGO |
+| PE ausente y entidad desconocida | Fail-closed estático; carga runtime PENDIENTE DE VALIDACIÓN EN JUEGO |
+| ICBM/nuclear/incendiaria/desconocidos | BLOQUEADO |
+
+### ACREDITADO ESTÁTICAMENTE
+
+- `gradlew.bat clean build --offline -PmodpackDir="C:\Users\panch\OneDrive\Desktop\KxCraft\server\mods" -PcandidatesDir="C:\Users\panch\OneDrive\Desktop\KxCraft\server\mods"` con Java 21: **BUILD SUCCESSFUL**; pasaron las **16 suites JavaExec**.
+- Pasaron los **17 verificadores estáticos**, incluidos `Verify-ProjectExplosiveCompatibility.ps1` (53 comprobaciones) y `Verify-ProjectExplosiveInterception.ps1` (53 comprobaciones). `git diff --check` pasó.
+- JAR binario `build/libs/create-military-integration-0.1.0-dev.jar`: SHA-256 `D48CD0C3EAE8AB02AE37A05E4AC3EFDE37EA22B9A1403C7C35D31C5C9D54D38F`. JAR de fuentes: SHA-256 `A10C619B2E92EBD88C97AF7F9673A8BFFC3BF39C7313D74B34C458BD31438FBB`.
+- El artefacto no contiene clases de Project: Explosive ni JARs de terceros. Los hashes de las dependencias fijadas fueron aceptados.
+
+### ACREDITADO EN JUEGO
+
+Ningún resultado. No se inició Minecraft, cliente, servidor ni GameTest; no se instaló el JAR y no se activó el opt-in.
+
+### PENDIENTE
+
+- Aplicación runtime de los mixins opcionales PE y del hook CBC; track, adquisición IFF, disparo, colisión y callback reales.
+- Que `discard()` después de una colisión preimpacto evite todo efecto PE en runtime. El bytecode examinado muestra que `remove(DISCARDED)` no llama directamente a `onHit`, pero no acredita cancelar trabajos externos ya iniciados ni todos los efectos secundarios.
+- En consecuencia, la intercepción real permanece pendiente de validación en juego. La opción experimental está desactivada por defecto.

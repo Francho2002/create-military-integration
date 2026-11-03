@@ -426,3 +426,44 @@ HEAD inicial: `7ae107fe45ad9314d54e52b5286b62c31545a90a`. El análisis de creaci
 - **16/16 verificadores** pasaron: `Verify-Artifact.ps1`, `Verify-CIWS.ps1`, `Verify-CiwsCandidateBudget.ps1`, `Verify-CiwsCoordination.ps1`, `Verify-CIWSMotionPrediction.ps1`, `Verify-Geometry.ps1`, `Verify-GuidanceBytecode.ps1`, `Verify-MixinTargets.ps1`, `Verify-MultiblockMissileRadar.ps1`, `Verify-ProjectExplosiveCompatibility.ps1` (52 comprobaciones), `Verify-RadarAutomation.ps1`, `Verify-RadarSpearArea.ps1`, `Verify-RadarSpearArrowCollision.ps1`, `Verify-RadarSpearBytecode.ps1`, `Verify-SableBytecode.ps1` y `Verify-SableMountedSystems.ps1`.
 - `git diff --check`: aprobado. JAR binario `create-military-integration-0.1.0-dev.jar`: SHA-256 `93DC6BA5EB744A6C565A9C386BEADD12E88181A8C6F168917877BAE11C6B1CB9`. JAR de fuentes: SHA-256 `C10D54A71980551F4AAA4A7AE88E986A27D089BE74CECDF3816FB93E392C8A39`. El binario incluye `NeutralizationPolicy` y `ProjectExplosiveBombObservation`, y no contiene código ni JARs de Project: Explosive.
 - No se inició Minecraft, cliente, servidor ni GameTest. El radar real, IFF en runtime, colisión CBC y respuesta PE a efectos secundarios siguen **PENDIENTES DE VALIDACIÓN EN JUEGO**; adquisición y neutralización PE siguen **BLOQUEADAS** por este ciclo.
+
+## CMI-PE-02B — intercepción física convencional Mk 82/Mk 84
+
+### ACREDITADO ESTÁTICAMENTE
+
+- El bytecode fijado de CBC 5.11.7 demuestra el recorrido `clipAndDamage → Level.getEntities(sweptAABB) → canHitEntity → intersección/AABB.clip → ProjectileContext.addEntity → hitEntities → onHitEntity`. La consulta de candidatos no excluye por sí misma `ThrowableProjectile`; el filtro nativo de CBC llama `Projectile.canHitEntity` y luego rechaza `instanceof Projectile`. Vanilla consulta `canBeHitByProjectile`, que exige entidad viva y `isPickable`; `Projectile.isPickable` usa el tag `REDIRECTABLE_PROJECTILE`. `isAttackable` no forma parte de este filtro.
+- El mixin sobre CBC permite pasar ese filtro solamente a tiros gestionados que tienen un permiso temporal ligado a una entidad PE convencional exacta. No cambia el AABB barrido, no modifica pickability/tag global y no se crea munición manualmente. Para tiros sin `cmiManagedShot` deja actuar el filtro y callback nativos de CBC. El callback que consume el permiso es `onHitEntity`, después de la comprobación geométrica CBC. CBC puede despachar varios callbacks previamente recolectados; una neutralización exitosa marca el interceptor consumido para impedir una segunda.
+- Se comparó el bytecode PE 0.7.2-beta por SHA-256 `3CBF5A76D8B6123A489DF54F0165C31DF6C5F6993DD07E9506232FCB3F3CEBB2`. Las clases Mk 82/Mk 84 heredan `ThrowableProjectile`, `onHit` activa un estado privado de impacto antes de continuar la detonación, y `HasExploded` lee el estado autoritativo. Los accessors opcionales CMI verifican esos estados. En ambas clases, `remove(DISCARDED)` hace limpieza y delega a `ThrowableProjectile.remove` sin llamar a `onHit`; esto no prueba la cancelación de trabajo externo ya iniciado.
+- `CmiConfig` declara el opt-in server-side `experimental.projectExplosiveConventionalBombInterception` con valor predeterminado `false` y comprobación de PE cargado. Las bombas PE no se agregaron a las rutas genéricas `CombatServices.projectile()`/`neutralize()`. Los tipos no permitidos del namespace continúan bloqueados.
+- La adquisición y las revalidaciones usan tracks PROJECTILE físicos, UUID actual, propietario de `Projectile.getOwner()` verificado como Player cargado, metadatos consistentes, IFF ENEMY, `canEngage`, protección y estado preimpacto. Se conserva expresamente `cmiLaunchContextVerified=false`: el owner real no prueba la ruta de creación de PE. Las pistas duplicadas contradictorias se rechazan.
+- El bytecode PE confirma gravedad `0.1f`; la integración requiere el historial de movimiento físico 2J y la evaluación de confianza existente antes de disparar. Las regresiones puras no simulan ni declaran una colisión observada.
+
+### ACREDITADO EN JUEGO
+
+Ningún resultado. No se ejecutaron Minecraft, cliente, servidor ni GameTest; no se instaló el JAR, no se activó el opt-in y no se modificó KxCraft.
+
+### PENDIENTE
+
+- Aplicación runtime de los mixins opcionales PE y del hook CBC.
+- Track real Mk 82/Mk 84, identificación IFF en partida, disparo CBC y callback geométrico real.
+- Que `discard()` tras una intercepción preimpacto evite todos los efectos PE en runtime; el bytecode de `remove` solo descarta la llamada directa a `onHit`.
+- Compatibilidad jugable completa, incluyendo ausencia de explosión PE secundaria o efectos diferidos.
+
+### ACREDITADO ESTÁTICAMENTE
+
+- `gradlew.bat clean build --offline -PmodpackDir="C:\Users\panch\OneDrive\Desktop\KxCraft\server\mods" -PcandidatesDir="C:\Users\panch\OneDrive\Desktop\KxCraft\server\mods"`: **BUILD SUCCESSFUL**, Java 21; **16/16 suites JavaExec** aprobadas.
+- **17/17 verificadores** estáticos aprobados. `Verify-ProjectExplosiveCompatibility.ps1`: 53 comprobaciones; `Verify-ProjectExplosiveInterception.ps1`: 53 comprobaciones. El verificador nuevo revisa los hashes fijados, la ruta CBC de candidato/filtro/geometría/callback, herencia de hooks CBC/Neo Warfare, estados PE y el artefacto compilado.
+- `git diff --check`: aprobado.
+- JAR binario: SHA-256 `D48CD0C3EAE8AB02AE37A05E4AC3EFDE37EA22B9A1403C7C35D31C5C9D54D38F`. JAR de fuentes: SHA-256 `A10C619B2E92EBD88C97AF7F9673A8BFFC3BF39C7313D74B34C458BD31438FBB`.
+- No se cambiaron dependencias ni instalaciones. El opt-in permanece OFF.
+
+### ACREDITADO EN JUEGO
+
+Ninguno. No se ejecutaron Minecraft, cliente, servidor ni GameTest; no se afirma que la colisión o neutralización hayan ocurrido en partida.
+
+### PENDIENTE
+
+- Aplicación y coexistencia runtime de los mixins `@Pseudo` de PE y del hook CBC.
+- Track físico real, IFF, disparo CBC, intersección geométrica y callback observado.
+- Ausencia runtime de explosión PE secundaria o trabajo diferido tras `discard()`. El bytecode confirma que `remove(DISCARDED)` no llama directamente a `onHit`, pero no prueba la cancelación de efectos externos ya iniciados.
+- La opción `experimental.projectExplosiveConventionalBombInterception` sigue **OFF**; la neutralización real permanece pendiente de validación en juego.

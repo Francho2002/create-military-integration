@@ -10,18 +10,21 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
+import net.minecraft.core.BlockPos;
 import local.cmi.weapons.CiwsPolicy;
 import local.cmi.mixin.weapons.RadarScanningFilterAccess;
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.phys.Vec3;
 
 /**
  * Read-only PE bomb observation over an already configured physical Create: Radars
- * snapshot. This class never adds a track to CIWS, acquires a lock, or authorizes fire.
+ * snapshot. {@link #inspect} remains observational; the explicitly named authorization methods
+ * supply current, fail-closed gates to the existing CIWS path and never fabricate radar tracks.
  */
 public final class ProjectExplosiveBombObservation {
     private static final int MAX_TRACKS = 128;
@@ -59,6 +62,14 @@ public final class ProjectExplosiveBombObservation {
             Vec3 radarPosition, Vec3 radarVelocity, UUID owner, OwnerEvidence ownerEvidence,
             boolean cmiLaunchContextVerified, Relation relation, boolean futureEligible,
             boolean acquisitionAuthorized, boolean neutralizationAuthorized, Rejection rejection) {}
+
+    /** Current, fail-closed CIWS view backed by one physical PROJECTILE radar track. */
+    public record Authorization(MilitaryContact contact, boolean playerOwnerVerified,
+            boolean cmiLaunchContextVerified, boolean metadataConsistent, Relation relation, boolean protectedTarget,
+            boolean detonationStateKnown, boolean impactOrDetonationStarted, long trackScannedAt) {}
+
+    /** Pure value form for testing duplicate physical tracks without constructing Minecraft entities. */
+    public record TrackIdentity(String id, TrackCategory category, long scannedTime, Vec3 position, Vec3 velocity) {}
 
     /** Pure authorization assessment; even a future-eligible observation remains inert in this cycle. */
     public static Decision assess(Evidence evidence) {
@@ -140,6 +151,130 @@ public final class ProjectExplosiveBombObservation {
                     decision.neutralizationAuthorized(), decision.rejection()));
         }
         return List.copyOf(out);
+    }
+
+    /**
+     * Adapts one track already obtained from the linked physical radar. The caller must have
+     * applied the radar's scanProjectiles switch and UUID correlation before calling this method.
+     */
+    public static java.util.Optional<Authorization> authorizeCiwsTrack(ServerLevel level, Actor observer,
+            Entity entity, RadarTrack track, long now, long maximumAge) {
+        if (level == null || observer == null || observer.owner() == null || entity == null || track == null ||
+                maximumAge < 0 || maximumAge > 5 || !CmiConfig.projectExplosiveConventionalInterceptionEnabled())
+            return java.util.Optional.empty();
+        if (!level.getServer().isSameThread() || entity.level() != level || !entity.isAlive() ||
+                level.getEntity(entity.getUUID()) != entity || !ProjectExplosiveCompatibility.isConventionalBomb(entity))
+            return java.util.Optional.empty();
+        if (track.trackCategory() != TrackCategory.PROJECTILE || !finite(track.position()) || !finite(track.velocity()) ||
+                track.scannedTime() < 0 || now < track.scannedTime() || now - track.scannedTime() > maximumAge ||
+                !entity.getUUID().toString().equals(track.id())) return java.util.Optional.empty();
+        if (!(entity instanceof Projectile projectile)) return java.util.Optional.empty();
+
+        Entity ownerEntity;
+        boolean impactOrDetonationStarted;
+        try {
+            ownerEntity = projectile.getOwner();
+            if (!(ownerEntity instanceof Player) || ownerEntity.isRemoved() || ownerEntity.level() != level ||
+                    level.getEntity(ownerEntity.getUUID()) != ownerEntity) return java.util.Optional.empty();
+            if (!(entity instanceof ProjectExplosiveBombState state)) return java.util.Optional.empty();
+            impactOrDetonationStarted = state.cmi$impactOrDetonationStarted();
+        } catch (RuntimeException | LinkageError unavailableState) {
+            return java.util.Optional.empty();
+        }
+        try {
+            boolean metadataConsistent = metadataConsistent(entity, ownerEntity.getUUID());
+            MilitaryContact base = CombatServices.resolve(level,
+                    new TargetId(TargetId.Kind.ENTITY, entity.getUUID())).orElse(null);
+            if (base == null || base.owner() == null || !ownerEntity.getUUID().equals(base.owner()))
+                return java.util.Optional.empty();
+            Relation relation = CombatServices.relation(level, observer, base);
+            boolean protectedTarget = CombatServices.isProtected(level, observer, entity.position());
+            boolean engageable = CombatServices.canEngage(level, observer, base);
+            var key = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
+            if (key == null || !NeutralizationPolicy.allowsConventionalBombAcquisition(key.toString(),
+                    CmiConfig.projectExplosiveConventionalInterceptionEnabled(), true, true, true,
+                    metadataConsistent, relation, protectedTarget, true, impactOrDetonationStarted) || !engageable)
+                return java.util.Optional.empty();
+
+            MilitaryContact ciwsContact = new MilitaryContact(base.id(), base.position(), base.velocity(), base.bounds(),
+                    base.owner(), base.platform(), true, base.hot(), base.seenTick());
+            return java.util.Optional.of(new Authorization(ciwsContact, true, false, metadataConsistent, relation,
+                    protectedTarget, true, impactOrDetonationStarted, track.scannedTime()));
+        } catch (RuntimeException | LinkageError unavailableIdentity) {
+            return java.util.Optional.empty();
+        }
+    }
+
+    /** Re-reads the same loaded physical radar immediately before/at the real CBC callback. */
+    public static java.util.Optional<Authorization> authorizeCiwsTargetFromRadar(ServerLevel level, Actor observer,
+            BlockPos radarPos, Entity entity, long now, long maximumAge, long requiredScannedAt) {
+        if (level == null || radarPos == null || entity == null || maximumAge < 0 || maximumAge > 5 ||
+                !level.hasChunkAt(radarPos)) return java.util.Optional.empty();
+        try {
+            var blockEntity = level.getBlockEntity(radarPos);
+            if (!(blockEntity instanceof IRadar radar) ||
+                    !(radar instanceof StationaryRadarBlockEntity) && !(radar instanceof RadarBearingBlockEntity) ||
+                    !(radar instanceof SmartBlockEntity smart) || radar.getWorldPos() == null ||
+                    !radar.getWorldPos().equals(radarPos) || ((net.minecraft.world.level.block.entity.BlockEntity)radar).getLevel() != level ||
+                    !radar.isRunning()) return java.util.Optional.empty();
+            RadarScanningBlockBehavior scanning = smart.getBehaviour(RadarScanningBlockBehavior.TYPE);
+            if (scanning == null || !((RadarScanningFilterAccess)(Object)scanning).cmi$scanProjectiles())
+                return java.util.Optional.empty();
+            Collection<RadarTrack> tracks = radar.getTracks();
+            if (tracks == null || tracks.size() > MAX_TRACKS) return java.util.Optional.empty();
+            RadarTrack matched = null;
+            for (RadarTrack track : tracks) {
+                if (track == null || !entity.getUUID().toString().equals(track.id())) continue;
+                if (track.trackCategory() != TrackCategory.PROJECTILE) return java.util.Optional.empty();
+                if (matched != null && !sameTrackObservation(matched, track)) return java.util.Optional.empty();
+                matched = track;
+            }
+            return matched == null || requiredScannedAt != Long.MIN_VALUE && requiredScannedAt != matched.scannedTime()
+                    ? java.util.Optional.empty() : authorizeCiwsTrack(level, observer, entity, matched, now, maximumAge);
+        } catch (RuntimeException | LinkageError unavailableRadar) {
+            return java.util.Optional.empty();
+        }
+    }
+
+    /** Conflicting observations for one UUID are ambiguous and cannot seed PE acquisition. */
+    public static boolean unambiguousPhysicalTrack(Collection<RadarTrack> tracks, RadarTrack expected) {
+        if (tracks == null || expected == null || expected.id() == null) return false;
+        for (RadarTrack other : tracks) {
+            if (other == null || other == expected || !expected.id().equals(other.id())) continue;
+            if (!sameTrackObservation(expected, other)) return false;
+        }
+        return true;
+    }
+
+    public static boolean unambiguousTrackIdentities(Collection<TrackIdentity> tracks, TrackIdentity expected) {
+        if (tracks == null || expected == null || expected.id() == null) return false;
+        for (TrackIdentity other : tracks) {
+            if (other == null || other == expected || !expected.id().equals(other.id())) continue;
+            if (!sameTrackObservation(expected, other)) return false;
+        }
+        return true;
+    }
+
+    private static boolean sameTrackObservation(RadarTrack first, RadarTrack second) {
+        return first.trackCategory() == second.trackCategory() && first.scannedTime() == second.scannedTime() &&
+                java.util.Objects.equals(first.position(), second.position()) &&
+                java.util.Objects.equals(first.velocity(), second.velocity());
+    }
+
+    private static boolean sameTrackObservation(TrackIdentity first, TrackIdentity second) {
+        return first.category() == second.category() && first.scannedTime() == second.scannedTime() &&
+                java.util.Objects.equals(first.position(), second.position()) &&
+                java.util.Objects.equals(first.velocity(), second.velocity());
+    }
+
+    private static boolean metadataConsistent(Entity entity, UUID projectileOwner) {
+        var tag = entity.getPersistentData();
+        if (tag.contains("cmiOwner") && (!tag.hasUUID("cmiOwner") || !projectileOwner.equals(tag.getUUID("cmiOwner")))) return false;
+        if (tag.contains("cmiIff") && (!tag.contains("cmiIff", net.minecraft.nbt.Tag.TAG_STRING) || !tag.getString("cmiIff").isBlank())) return false;
+        if (tag.contains("cmiPlatform")) return false; // PE launch provenance has no verified CMI platform contract.
+        if (tag.contains("cmiManagedShot") && (!tag.contains("cmiManagedShot", net.minecraft.nbt.Tag.TAG_BYTE) || tag.getBoolean("cmiManagedShot"))) return false;
+        if (tag.contains("cmiManaged") && (!tag.contains("cmiManaged", net.minecraft.nbt.Tag.TAG_BYTE) || tag.getBoolean("cmiManaged"))) return false;
+        return true;
     }
 
     private static Decision denied(Rejection reason) { return new Decision(false, false, false, reason); }

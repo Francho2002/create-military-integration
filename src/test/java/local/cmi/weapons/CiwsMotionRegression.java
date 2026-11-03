@@ -96,6 +96,24 @@ public final class CiwsMotionRegression {
         var linear3=linearTracker.observe(observer,target,provenance,111,linearP2,linearV,112).history();
         check(CiwsMotionPolicy.assess(linear3,.25).model()==CiwsMotionPolicy.Model.LINEAR,"three zero-acceleration observations remain linear");
 
+        var bombMotion=new CiwsMotionTracker();
+        V3 gravity=v(0,-.1,0), bombP0=v(20,120,30), bombV0=v(0,-1,0);
+        V3 bombP1=ballisticPosition(bombP0,bombV0,gravity,5), bombV1=bombV0.add(gravity.scale(5));
+        V3 bombP2=ballisticPosition(bombP1,bombV1,gravity,5), bombV2=bombV1.add(gravity.scale(5));
+        var bombFirst=bombMotion.observe(observer,target,provenance,301,bombP0,bombV0,301).history();
+        check(CiwsMotionPolicy.assess(bombFirst,.25).model()==CiwsMotionPolicy.Model.INSUFFICIENT,
+                "a PE bomb's first physical sweep cannot produce a firing model");
+        var bombTwo=bombMotion.observe(observer,target,provenance,306,bombP1,bombV1,306).history();
+        check(CiwsMotionPolicy.atImpact(CiwsMotionPolicy.assess(bombTwo,.25),10,0,.25)==CiwsMotionPolicy.Model.UNRELIABLE,
+                "gravity-sized measured acceleration blocks linear extrapolation outside the real bomb hitbox margin");
+        var bombThree=bombMotion.observe(observer,target,provenance,311,bombP2,bombV2,311).history();
+        var bombAssessment=CiwsMotionPolicy.assess(bombThree,.25);
+        check(bombAssessment.model()==CiwsMotionPolicy.Model.ACCELERATED&&
+                Math.abs(bombAssessment.acceleration().y()+.1)<1.0e-12,
+                "three distinct physical sweeps estimate the PE bomb's measured downward acceleration");
+        check(CiwsMotionPolicy.atImpact(bombAssessment,10,0,.25)==CiwsMotionPolicy.Model.ACCELERATED,
+                "a stable bomb motion trend can use the existing accelerated TargetMotion contract");
+
         var oneSample=CiwsMotionPolicy.assess(reset.history(),.25);
         check(oneSample.model()==CiwsMotionPolicy.Model.INSUFFICIENT,"one sample cannot authorize contraption prediction");
         check(CiwsMotionPolicy.atImpact(oneSample,5,0,.25)==CiwsMotionPolicy.Model.UNRELIABLE,"insufficient model cannot authorize fire");
@@ -221,7 +239,11 @@ public final class CiwsMotionRegression {
         check(coordinator.contains("radar.getTracks()")&&coordinator.contains("MOTION.observe(observer, id")&&coordinator.contains("track.scannedTime()"),"only physical radar track observations enter history");
         check(!coordinator.contains("CombatServices.contacts(")&&!coordinator.contains("getAllEntities(")&&!coordinator.contains("Sensor.scan("),"motion history does not introduce a global sensor");
         check(!trackerSource.contains("net.minecraft.world.entity.Entity")&&!trackerSource.contains("ServerLevel")&&!trackerSource.contains("CombatServices."),"history stores no entity or world references");
-        check(coordinator.contains("target instanceof MunitionsPhysicsContraptionEntity")&&coordinator.contains("new TargetMotion(Ships.v3(contact.position()), Ships.v3(velocity), targetAcceleration)"),"only contraption missile path supplies measured acceleration to solver");
+        check(coordinator.contains("requiresMotionConfidence(target)")&&
+                coordinator.contains("target instanceof MunitionsPhysicsContraptionEntity")&&
+                coordinator.contains("ProjectExplosiveCompatibility.isConventionalBomb(target)")&&
+                coordinator.contains("new TargetMotion(Ships.v3(contact.position()), Ships.v3(velocity), targetAcceleration)"),
+                "only contraption missiles and exact conventional PE bombs supply radar-measured confidence to the existing solver");
         check(coordinator.contains("plan.solver().approach(aim.barrel())")&&coordinator.contains("solver.path(direction, lifetime)"),"alignment uses the same solver model and path remains the cannon shell path");
         check(coordinator.contains("CiwsMotionPolicy.atImpact")&&coordinator.contains("TrajectorySafety.clear")&&coordinator.contains("CombatServices.relation")&&coordinator.contains("CombatServices.canEngage")&&coordinator.contains("radarTrackStillCurrent(binding.radar()"),"prediction requires hit-margin, final physical-track refresh, IFF and safe corridor");
         check(!coordinator.contains("CombatServices.neutralize(")&&!coordinator.contains("new AbstractCannonProjectile"),"prediction cannot synthesize or neutralize an impact");

@@ -179,12 +179,16 @@ public final class ProjectExplosiveCompatibilityRegression {
                 coordinator.indexOf("private static boolean sensorAllows("));
         String fresh = coordinator.substring(coordinator.indexOf("private static boolean radarTrackStillCurrent("),
                 coordinator.indexOf("private static CiwsMotionTracker.Observer motionObserver("));
-        check(plans.contains("ProjectExplosiveCompatibility.blocksAutomaticCiws(target)"),
-                "PE type is rejected before plan/solver acquisition");
-        check(held.contains("ProjectExplosiveCompatibility.blocksAutomaticCiws(entity)"),
-                "held/reserved target revalidation rejects PE");
+        check(plans.contains("ProjectExplosiveCompatibility.isConventionalBomb(target)") &&
+                plans.contains("ProjectExplosiveBombObservation.authorizeCiwsTrack") &&
+                plans.contains("ProjectExplosiveCompatibility.blocksAutomaticCiws(target)"),
+                "only exact conventional bombs enter the separately authorized radar plan path; other PE types reject before solving");
+        check(held.contains("ProjectExplosiveCompatibility.isConventionalBomb(entity)") &&
+                held.contains("ProjectExplosiveBombObservation.authorizeCiwsTrack") &&
+                held.contains("ProjectExplosiveCompatibility.blocksAutomaticCiws(entity)"),
+                "held/reserved PE targets require current conventional authorization; other PE types remain blocked");
         check(fresh.contains("ProjectExplosiveCompatibility.blocksAutomaticCiws(expected)"),
-                "pre-fire fresh-track validation rejects PE");
+                "generic pre-fire fast path continues to reject all PE outside the narrow conventional branch");
         check(compatibility.contains("public boolean acquirable() { return false; }") &&
                 compatibility.contains("public boolean neutralizable() { return false; }"),
                 "recognition is distinct from acquisition and neutralization");
@@ -194,8 +198,10 @@ public final class ProjectExplosiveCompatibilityRegression {
         check(combat.contains("!neutralizable(e)") && neutralization.contains("classifyRegistryId(registryId).neutralizable()"),
                 "central neutralize path requires explicit policy beyond recognition and IFF");
         check(interception.contains("ProjectExplosiveCompatibility.isProjectExplosive(other)") &&
+                interception.contains("ProjectExplosiveInterception.canHit(self,l,other)") &&
+                interception.contains("ProjectExplosiveInterception.onPhysicalCbcHit(self,l,other)") &&
                 interception.contains("CombatServices.neutralizable(other)") && interception.contains("CombatServices.neutralize"),
-                "managed CBC collision cannot neutralize PE through recognition alone");
+                "PE collisions use a separate narrow physical-hit policy; generic recognition cannot authorize them");
         check(integration.contains("ProjectExplosiveCompatibility.isProjectExplosive(target)") &&
                 integration.contains("!CombatServices.neutralizable(target)"),
                 "managed explosion path excludes PE from both neutralization and vanilla entity damage");
@@ -208,6 +214,6 @@ public final class ProjectExplosiveCompatibilityRegression {
         check(observation.contains("new Decision(true, false, false, Rejection.AWAITING_PE_02B_AUTHORIZATION)") &&
                 observation.contains("false, relation, decision.futureEligible(), decision.acquisitionAuthorized()"),
                 "observation can mark a future review candidate without enabling acquisition or neutralization");
-        System.out.println("OK: exact PE registry recognition is optional and observational; all PE CIWS acquisition and neutralization remain blocked");
+        System.out.println("OK: exact PE recognition remains separate from the narrow, revalidated Mk 82/Mk 84 interception policy");
     }
 }

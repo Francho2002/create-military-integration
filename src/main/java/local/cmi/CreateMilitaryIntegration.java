@@ -11,6 +11,8 @@ import net.minecraft.commands.arguments.coordinates.BlockPosArgument;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.neoforged.fml.common.Mod;
+import net.neoforged.fml.ModLoadingContext;
+import net.neoforged.fml.config.ModConfig;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.server.ServerStoppedEvent;
@@ -20,7 +22,7 @@ import net.neoforged.neoforge.event.level.LevelEvent;
 @Mod(CreateMilitaryIntegration.ID)
 public final class CreateMilitaryIntegration {
     public static final String ID="create_military_integration";
-    public CreateMilitaryIntegration(){NeoForge.EVENT_BUS.addListener(this::commands);NeoForge.EVENT_BUS.addListener(this::stopped);NeoForge.EVENT_BUS.addListener(this::spawned);NeoForge.EVENT_BUS.addListener(this::explosion);NeoForge.EVENT_BUS.addListener(this::levelUnloaded);NeoForge.EVENT_BUS.addListener(this::chunkUnloaded);}
+    public CreateMilitaryIntegration(){ModLoadingContext.get().getActiveContainer().registerConfig(ModConfig.Type.SERVER,CmiConfig.SERVER_SPEC);NeoForge.EVENT_BUS.addListener(this::commands);NeoForge.EVENT_BUS.addListener(this::stopped);NeoForge.EVENT_BUS.addListener(this::spawned);NeoForge.EVENT_BUS.addListener(this::explosion);NeoForge.EVENT_BUS.addListener(this::levelUnloaded);NeoForge.EVENT_BUS.addListener(this::chunkUnloaded);}
     private void explosion(net.neoforged.neoforge.event.level.ExplosionEvent.Detonate event){
         if(!(event.getLevel() instanceof net.minecraft.server.level.ServerLevel level))return;
         var source=event.getExplosion().getDirectSourceEntity();if(source==null||!CombatServices.projectile(source)||!(source.getPersistentData().getBoolean("cmiManagedShot")||source.getPersistentData().getBoolean("cmiManaged")))return;
@@ -36,12 +38,13 @@ public final class CreateMilitaryIntegration {
         event.getAffectedBlocks().removeIf(pos->CombatServices.isProtected(level,actor,net.minecraft.world.phys.Vec3.atCenterOf(pos)));
     }
     private void spawned(net.neoforged.neoforge.event.entity.EntityJoinLevelEvent event){
-        var actor=ShotContext.current();if(!(event.getLevel() instanceof net.minecraft.server.level.ServerLevel)||actor==null||actor.owner()==null||!CombatServices.projectile(event.getEntity()))return;
+        var actor=ShotContext.current();if(!(event.getLevel() instanceof net.minecraft.server.level.ServerLevel level)||actor==null||actor.owner()==null||!CombatServices.projectile(event.getEntity()))return;
         var t=event.getEntity().getPersistentData();if(ShotContext.managed())t.putBoolean("cmiManagedShot",true);t.putUUID("cmiOwner",actor.owner());t.putString("cmiIff",actor.iff()==null?"":actor.iff());if(actor.platform()!=null)t.putUUID("cmiPlatform",actor.platform());
+        ProjectExplosiveInterception.captureManagedCannonShot(level,event.getEntity(),actor);
     }
-    private void stopped(ServerStoppedEvent event){CombatServices.clear();local.cmi.weapons.CiwsCoordinator.clear();}
+    private void stopped(ServerStoppedEvent event){CombatServices.clear();local.cmi.weapons.CiwsCoordinator.clear();ProjectExplosiveInterception.clear();}
     private void levelUnloaded(LevelEvent.Unload event){
-        if(event.getLevel() instanceof ServerLevel level)local.cmi.weapons.CiwsCoordinator.clearDimension(level.dimension().location().toString());
+        if(event.getLevel() instanceof ServerLevel level){local.cmi.weapons.CiwsCoordinator.clearDimension(level.dimension().location().toString());ProjectExplosiveInterception.clearDimension(level.dimension().location());}
     }
     private void chunkUnloaded(ChunkEvent.Unload event){
         if(event.getLevel() instanceof ServerLevel level)local.cmi.weapons.CiwsCoordinator.clearChunk(level.dimension().location().toString(),event.getChunk().getPos());

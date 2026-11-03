@@ -62,10 +62,14 @@ Check ($adapter.Contains('if (registryId == null) return true;') -and
 Check (!$adapter.Contains('lil1llilol11') -and !$adapter.Contains('Class.forName') -and !$adapter.Contains('projectexplosive.')) 'adapter has no PE Java dependency or reflection'
 Check ($gradle -notmatch '(?is)\b(?:implementation|api|compileOnly|runtimeOnly)\s+[^\r\n]*projectexplosive' -and
     !$hashes.ToLowerInvariant().Contains('projectexplosive')) 'no required PE dependency or hash pin was added'
-Check ($null -ne $plans -and $plans.Contains('ProjectExplosiveCompatibility.blocksAutomaticCiws(target)') -and
-    $plans.IndexOf('ProjectExplosiveCompatibility.blocksAutomaticCiws(target)') -lt $plans.IndexOf('FiringSolver solver =')) 'acquisition rejects PE before candidate solving'
-Check ($null -ne $held -and $held.Contains('ProjectExplosiveCompatibility.blocksAutomaticCiws(entity)')) 'retained reservation/lock revalidation rejects PE'
-Check ($null -ne $fresh -and $fresh.Contains('ProjectExplosiveCompatibility.blocksAutomaticCiws(expected)')) 'pre-fire physical track revalidation rejects PE'
+Check ($null -ne $plans -and $plans.Contains('ProjectExplosiveCompatibility.isConventionalBomb(target)') -and
+    $plans.Contains('ProjectExplosiveBombObservation.authorizeCiwsTrack') -and
+    $plans.Contains('ProjectExplosiveCompatibility.blocksAutomaticCiws(target)') -and
+    $plans.IndexOf('ProjectExplosiveCompatibility.blocksAutomaticCiws(target)') -lt $plans.IndexOf('FiringSolver solver =')) 'only current, authorized Mk 82/Mk 84 tracks enter CIWS solver; all other PE types reject before solving'
+Check ($null -ne $held -and $held.Contains('ProjectExplosiveCompatibility.isConventionalBomb(entity)') -and
+    $held.Contains('ProjectExplosiveBombObservation.authorizeCiwsTrack') -and
+    $held.Contains('ProjectExplosiveCompatibility.blocksAutomaticCiws(entity)')) 'retained/reserved Mk 82/Mk 84 revalidate exact policy; other PE types remain blocked'
+Check ($null -ne $fresh -and $fresh.Contains('ProjectExplosiveCompatibility.blocksAutomaticCiws(expected)')) 'generic fresh-track path remains closed to PE outside the explicit conventional branch'
 Check ($coordinator.Contains('radar.getTracks()') -and !$coordinator.Contains('CombatServices.contacts(') -and
     !$coordinator.Contains('getAllEntities(') -and !$coordinator.Contains('Sensor.scan(')) 'CIWS sensor remains the linked physical radar only'
 Check ($coordinator.Contains('CombatServices.relation(level, actor, contact)') -and $coordinator.Contains('CombatServices.canEngage(level, actor, contact)') -and
@@ -75,7 +79,9 @@ Check (!$combat.Contains('projectexplosive:') -and $combat.Contains('AbstractCan
     $combat.Contains('wariumce:radar_spear_missile_projectile') -and $combat.Contains('NeutralizationPolicy.allows(key.toString(),projectile(e))')) 'legacy CBC/Warium recognition is preserved and destructive permission is separately centralized'
 Check ($neutralization.Contains('classifyRegistryId(registryId).neutralizable()') -and $combat.Contains('!neutralizable(e)')) 'CombatServices.neutralize requires the independent neutralization policy'
 Check ($interception.Contains('ProjectExplosiveCompatibility.isProjectExplosive(other)') -and
-    $interception.Contains('CombatServices.neutralizable(other)') -and $interception.Contains('CombatServices.neutralize(')) 'managed physical collision cannot bypass PE neutralization denial'
+    $interception.Contains('ProjectExplosiveInterception.canHit(self,l,other)') -and
+    $interception.Contains('ProjectExplosiveInterception.onPhysicalCbcHit(self,l,other)') -and
+    $interception.Contains('CombatServices.neutralizable(other)') -and $interception.Contains('CombatServices.neutralize(')) 'PE uses its isolated conventional collision policy; generic recognition still cannot authorize destruction'
 Check ($integration.Contains('ProjectExplosiveCompatibility.isProjectExplosive(target)') -and
     $integration.Contains('!CombatServices.neutralizable(target)')) 'managed explosion excludes PE from neutralization and vanilla entity damage'
 Check ($observation.Contains('radar.getTracks()') -and $observation.Contains('level.getEntity(id)') -and

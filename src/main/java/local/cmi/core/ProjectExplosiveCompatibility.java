@@ -6,6 +6,7 @@ import net.minecraft.world.entity.Entity;
 /** Optional, registry-ID-only recognition for Project: Explosive. Recognition grants no combat authority. */
 public final class ProjectExplosiveCompatibility {
     private ProjectExplosiveCompatibility() {}
+    public static final String MOD_ID = "projectexplosive";
 
     public enum Kind {
         SMALL_BOMB,
@@ -77,6 +78,10 @@ public final class ProjectExplosiveCompatibility {
         if (entity == null) return UNKNOWN;
         var id = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
         return id == null ? UNKNOWN : classifyRegistryId(id.toString());
+    }
+
+    public static boolean isConventionalBomb(Entity entity) {
+        return classify(entity).kind().conventionalBomb();
     }
 
     public static boolean isProjectExplosive(Entity entity) {

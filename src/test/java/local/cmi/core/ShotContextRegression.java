@@ -25,7 +25,8 @@ public final class ShotContextRegression {
         check(main.contains("if(ShotContext.managed())t.putBoolean(\"cmiManagedShot\",true)"), "manual spawn receives no managed marker");
         check(main.contains("CombatServices.neutralize(level,actor,contact.get())) event.getAffectedEntities().remove(target)"), "neutralized projectile removed from blast victims");
         String hit = java.nio.file.Files.readString(java.nio.file.Path.of("src/main/java/local/cmi/mixin/safety/CannonInterceptionMixin.java"));
-        check(hit.split("!self.getPersistentData\\(\\).getBoolean\\(\"cmiManagedShot\"\\)", -1).length == 3, "both collision hooks require managed shot");
+        check(hit.split("!self.getPersistentData\\(\\).getBoolean\\(\"cmiManagedShot\"\\)", -1).length == 5,
+                "both collision hooks gate CMI behavior to managed shots while unmanaged PE collisions retain native behavior");
         String ownership = java.nio.file.Files.readString(java.nio.file.Path.of("src/main/java/local/cmi/mixin/safety/ShotOwnershipMixin.java"));
         check(ownership.contains("MountedMunitionsLauncherContraption") && ownership.contains("@WrapMethod(method=\"fireShot\")"), "Neo Warfare launcher uses the authentic scoped fireShot hook");
         check(ownership.contains("ShotContext.push(CombatServices.actor(level,carrier))") && ownership.contains("finally{ShotContext.pop();}"), "launcher provenance is limited to its native shot call");

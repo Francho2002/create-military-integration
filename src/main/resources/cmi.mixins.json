@@ -26,6 +26,8 @@
     "safety.FireControllerPersistenceMixin",
     "safety.BallisticSafetyMixin",
     "safety.CannonInterceptionMixin",
+    "safety.ProjectExplosiveSmallBombStateMixin",
+    "safety.ProjectExplosiveBigBombStateMixin",
     "safety.CompactTickMixin",
     "safety.CiwsFireGuardMixin",
     "safety.ComputerTargetAccess",

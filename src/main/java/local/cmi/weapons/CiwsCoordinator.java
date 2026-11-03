@@ -25,6 +25,7 @@ import local.cmi.core.CombatServices;
 import local.cmi.core.MilitaryContact;
 import local.cmi.core.MountedBlockReference;
 import local.cmi.core.ProjectExplosiveCompatibility;
+import local.cmi.core.ProjectExplosiveBombObservation;
 import local.cmi.core.Relation;
 import local.cmi.core.TargetId;
 import local.cmi.core.TrajectorySafety;
@@ -270,14 +271,28 @@ public final class CiwsCoordinator {
         FiringSolver.Approach actual = plan.solver().approach(aim.barrel());
         if (!CiwsPolicy.acceptableSolution(aim.barrel().isFinite(), true, actual.miss(), plan.tolerance(), actual.time(), shell.lifetimeTicks())) return;
         if (plan.motionAssessment() != null && CiwsMotionPolicy.atImpact(plan.motionAssessment(), actual.time(), actual.miss(), plan.tolerance()) != plan.motionAssessment().model()) return;
-        MilitaryContact current = CombatServices.resolve(level, plan.contact().id()).orElse(null);
+        boolean peBomb = ProjectExplosiveCompatibility.isConventionalBomb(plan.target());
+        MilitaryContact current = peBomb
+                ? ProjectExplosiveBombObservation.authorizeCiwsTargetFromRadar(level, actor,
+                        binding.radar().getWorldPos(), plan.target(), now, 1, plan.scannedAt())
+                        .map(ProjectExplosiveBombObservation.Authorization::contact).orElse(null)
+                : CombatServices.resolve(level, plan.contact().id()).orElse(null);
         if (current == null || current.owner() == null || !current.projectile() || !plan.target().isAlive() ||
                 level.getEntity(selected.id()) != plan.target() || CombatServices.relation(level, actor, current) != Relation.ENEMY ||
                 !CombatServices.canEngage(level, actor, current) || !ready(level, mount, cannon, actor)) { clearLock(level, mount); return; }
-        if (!radarTrackStillCurrent(binding.radar(), plan.target(), selected.id(), plan.scannedAt(), now)) { clearLock(level, mount); return; }
+        if (peBomb) {
+            if (ProjectExplosiveBombObservation.authorizeCiwsTargetFromRadar(level, actor,
+                    binding.radar().getWorldPos(), plan.target(), now, 1, plan.scannedAt()).isEmpty()) { clearLock(level, mount); return; }
+        } else if (!radarTrackStillCurrent(binding.radar(), plan.target(), selected.id(), plan.scannedAt(), now)) { clearLock(level, mount); return; }
         if (!motionStillCurrent(plan, current)) { clearLock(level, mount); return; }
         // Check the whole finite lifetime, including a miss beyond the enemy projectile.
         if (!safePath(level, actor, cannon, plan.target(), pivot, plan.solver(), aim.barrel(), shell.lifetimeTicks())) { clearLock(level, mount); return; }
+        if (peBomb && (!isProjectExplosiveInterceptionEnabled() ||
+                !projectExplosiveShotBindingCurrent(level, mount.getBlockPos(), binding.radar().getWorldPos(), cannon, actor) ||
+                ProjectExplosiveBombObservation.authorizeCiwsTargetFromRadar(level, actor,
+                        binding.radar().getWorldPos(), plan.target(), now, 1, plan.scannedAt()).isEmpty())) {
+            clearLock(level, mount); return;
+        }
         if (!CombatServices.canEngage(level, actor, current) ||
                 !CombatServices.reserve(level, current.id(), identity, (int)Math.ceil(actual.time()) + 2)) { clearLock(level, mount); return; }
         // Reserve before entering native fireShot to prevent a second same-tick request. The void
@@ -288,7 +303,13 @@ public final class CiwsCoordinator {
         FirePermit prior = FIRE_PERMIT.get();
         FIRE_PERMIT.set(new FirePermit(level, cannon));
         boolean invocationReturned;
-        try { invocationReturned = WeaponAdapters.fire(level, cannon); }
+        try {
+            if (peBomb) {
+                invocationReturned = local.cmi.core.ProjectExplosiveInterception.fireWithPermit(level,
+                        mount.getBlockPos(), binding.radar().getWorldPos(), cannon, plan.target(),
+                        plan.scannedAt(), actor, now, () -> WeaponAdapters.fire(level, cannon));
+            } else invocationReturned = WeaponAdapters.fire(level, cannon);
+        }
         finally { if (prior == null) FIRE_PERMIT.remove(); else FIRE_PERMIT.set(prior); }
         if (!invocationReturned) {
             data.remove(LAST_FIRE);
@@ -304,6 +325,22 @@ public final class CiwsCoordinator {
         if (!(cannon.getController() instanceof BlockEntity mount) || !controls(mount)) return true;
         FirePermit permit = FIRE_PERMIT.get();
         return permit != null && permit.level == level && permit.cannon == cannon && permit.once.consume();
+    }
+
+    /** Revalidates the explicit WORLD CIWS/radar binding before a PE shot is scoped and again at impact. */
+    public static boolean projectExplosiveShotBindingCurrent(ServerLevel level, BlockPos mountPos,
+            BlockPos radarPos, PitchOrientedContraptionEntity cannon, Actor expectedActor) {
+        if (level == null || mountPos == null || radarPos == null || cannon == null || expectedActor == null ||
+                expectedActor.owner() == null || !level.getServer().isSameThread() ||
+                !mainLevel(level, mountPos) || !mainLevel(level, radarPos)) return false;
+        BlockEntity be = level.hasChunkAt(mountPos) ? level.getBlockEntity(mountPos) : null;
+        if (!(be instanceof CompactCannonMountBlockEntity mount) || !controls(mount) || mount.getLevel() != level ||
+                !expectedActor.equals(CombatServices.actor(level, mountPos)) ||
+                !mount.getPersistentData().hasUUID("cmiOwner") ||
+                !expectedActor.owner().equals(mount.getPersistentData().getUUID("cmiOwner")) ||
+                WeaponAdapters.compactContraption(mount) != cannon || cannon.getController() != mount) return false;
+        Binding current = binding(level, mount);
+        return current.error() == null && current.radar() != null && radarPos.equals(current.radar().getWorldPos());
     }
 
     private static List<Plan> plans(ServerLevel level, CompactCannonMountBlockEntity mount,
@@ -327,9 +364,17 @@ public final class CiwsCoordinator {
             UUID id = CiwsPolicy.projectileId(track.trackCategory() == TrackCategory.PROJECTILE, track.id(), now, track.scannedTime());
             if (id == null || !finite(track.position()) || !finite(track.velocity())) continue;
             Entity target = level.getEntity(id);
-            if (target == null || !target.isAlive() || ProjectExplosiveCompatibility.blocksAutomaticCiws(target) ||
-                    !CombatServices.projectile(target) || !sensorAllows(radarSnapshot, target)) continue;
-            var contact = CombatServices.resolve(level, new TargetId(TargetId.Kind.ENTITY, id)).orElse(null);
+            if (target == null || !target.isAlive() || !sensorAllows(radarSnapshot, target)) continue;
+            boolean peBomb = ProjectExplosiveCompatibility.isConventionalBomb(target);
+            MilitaryContact contact;
+            if (peBomb) {
+                if (!ProjectExplosiveBombObservation.unambiguousPhysicalTrack(radarSnapshot.tracks(), track)) continue;
+                contact = ProjectExplosiveBombObservation.authorizeCiwsTrack(level, actor, target, track, now, 1)
+                        .map(ProjectExplosiveBombObservation.Authorization::contact).orElse(null);
+            } else {
+                if (ProjectExplosiveCompatibility.blocksAutomaticCiws(target) || !CombatServices.projectile(target)) continue;
+                contact = CombatServices.resolve(level, new TargetId(TargetId.Kind.ENTITY, id)).orElse(null);
+            }
             if (contact == null) { MOTION.invalidate(observer, id); continue; }
             Relation relation = CombatServices.relation(level, actor, contact);
             boolean canEngage = CombatServices.canEngage(level, actor, contact);
@@ -341,7 +386,7 @@ public final class CiwsCoordinator {
             authorizedTracks.add(id);
             CiwsMotionTracker.History motionHistory = null;
             CiwsMotionPolicy.Assessment motionAssessment = null;
-            if (target instanceof MunitionsPhysicsContraptionEntity) {
+            if (requiresMotionConfidence(target)) {
                 var update = MOTION.observe(observer, id,
                         new CiwsMotionTracker.Provenance(contact.owner(), contact.platform()), track.scannedTime(),
                         Ships.v3(track.position()), Ships.v3(track.velocity()), now);
@@ -432,9 +477,18 @@ public final class CiwsCoordinator {
             UUID id = CiwsPolicy.projectileId(track.trackCategory() == TrackCategory.PROJECTILE, track.id(), now, track.scannedTime());
             if (!expected.equals(id) || !finite(track.position()) || !finite(track.velocity())) continue;
             Entity entity = level.getEntity(id);
-            if (entity == null || !entity.isAlive() || ProjectExplosiveCompatibility.blocksAutomaticCiws(entity) ||
-                    !CombatServices.projectile(entity) || !sensorAllows(radarSnapshot, entity)) return false;
-            MilitaryContact contact = CombatServices.resolve(level, new TargetId(TargetId.Kind.ENTITY, id)).orElse(null);
+            if (ProjectExplosiveCompatibility.isConventionalBomb(entity) &&
+                    !ProjectExplosiveBombObservation.unambiguousPhysicalTrack(radarSnapshot.tracks(), track)) return false;
+            if (entity == null || !entity.isAlive() || !sensorAllows(radarSnapshot, entity)) return false;
+            boolean peBomb = ProjectExplosiveCompatibility.isConventionalBomb(entity);
+            MilitaryContact contact;
+            if (peBomb) {
+                contact = ProjectExplosiveBombObservation.authorizeCiwsTrack(level, actor, entity, track, now, 1)
+                        .map(ProjectExplosiveBombObservation.Authorization::contact).orElse(null);
+            } else {
+                if (ProjectExplosiveCompatibility.blocksAutomaticCiws(entity) || !CombatServices.projectile(entity)) return false;
+                contact = CombatServices.resolve(level, new TargetId(TargetId.Kind.ENTITY, id)).orElse(null);
+            }
             if (contact == null || !CiwsPolicy.eligible(true, contact.projectile(), actor.owner(), contact.owner(), actor.platform(), contact.platform(),
                     CombatServices.relation(level, actor, contact), CombatServices.canEngage(level, actor, contact))) return false;
             Vec3 offset = contact.position().subtract(Vec3.atCenterOf(mount.getBlockPos())), velocity = contact.velocity();
@@ -446,6 +500,12 @@ public final class CiwsCoordinator {
     private static boolean sensorAllows(RadarSnapshot snapshot, Entity target) {
         return snapshot != null && target != null && CiwsPolicy.sensorAllows(snapshot.scanProjectiles(),
                 snapshot.scanContraptions(), target instanceof AbstractContraptionEntity);
+    }
+
+    /** PE bombs use ThrowableProjectile gravity/drag, so linear extrapolation needs measured confidence. */
+    private static boolean requiresMotionConfidence(Entity target) {
+        return target instanceof MunitionsPhysicsContraptionEntity ||
+                ProjectExplosiveCompatibility.isConventionalBomb(target);
     }
 
     private static boolean radarTrackStillCurrent(IRadar radar, Entity expected, UUID target, long scannedAt, long now) {
@@ -549,6 +609,10 @@ public final class CiwsCoordinator {
         return actor.owner() != null && actor.owner().equals(player) && be.getPersistentData().hasUUID("cmiOwner") && player.equals(be.getPersistentData().getUUID("cmiOwner"));
     }
     private static boolean finite(Vec3 p) { return p != null && Double.isFinite(p.x) && Double.isFinite(p.y) && Double.isFinite(p.z); }
+
+    private static boolean isProjectExplosiveInterceptionEnabled() {
+        return local.cmi.core.CmiConfig.projectExplosiveConventionalInterceptionEnabled();
+    }
     private static UUID reservationIdentity(ServerLevel level, CompactCannonMountBlockEntity mount) {
         return UUID.nameUUIDFromBytes(("cmi-ciws:" + level.dimension().location() + ":" + mount.getBlockPos().asLong()).getBytes(StandardCharsets.UTF_8));
     }
