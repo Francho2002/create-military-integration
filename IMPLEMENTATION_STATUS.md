@@ -343,3 +343,46 @@ El solver continúa siendo `FiringSolver.Arc.LOW` con física, vida útil y bal�
 | Intercepción de contraption maniobrante | CONDICIONADO a tres barridos consistentes; giro brusco inhibe fuego. |
 
 No se introducen sensores, threads, predicción de impacto como neutralización, cambios de física, daños ni cambios en filtros radar. Sin trayectoria runtime observada, esta entrega no acredita interceptaciones en partida.
+
+## CMI-PE-01 — compatibilidad observacional con Project: Explosive 0.7.2-beta
+
+CMI reconoce nueve IDs de entidad exactos desde `ProjectExplosiveCompatibility`; no importa clases Java de Project: Explosive, no usa reflexión y no añade ese mod a Gradle ni a `dependency-hashes.properties`. El reconocimiento solo da una clasificación de compatibilidad futura. Todas las clases devuelven `acquirable=false` y `neutralizable=false`; además, el CIWS rechaza cualquier entidad del namespace `projectexplosive`, incluidos IDs futuros no catalogados. El gate se comprueba durante adquisición, retención de lock/reserva y revalidación del track antes del disparo. El radar físico `IRadar.getTracks()` sigue siendo la única fuente de detección.
+
+| EntityType | Clasificación CMI | Adquisición automática | Neutralización |
+|---|---|---|---|
+| `projectexplosive:small_bomb` | Reconocido; candidato para futura interoperabilidad | BLOQUEADA | BLOQUEADA |
+| `projectexplosive:big_bomb` | Reconocido; candidato para futura interoperabilidad | BLOQUEADA | BLOQUEADA |
+| `projectexplosive:fire_bomb` | Reconocido; candidato para futura interoperabilidad | BLOQUEADA | BLOQUEADA |
+| `projectexplosive:nuclear_bomb` | Reconocido; candidato para futura interoperabilidad | BLOQUEADA | BLOQUEADA |
+| `projectexplosive:icbm` | Reconocido; candidato para futura interoperabilidad | BLOQUEADA | BLOQUEADA |
+| `projectexplosive:icbm_booster` | Reconocido; entidad auxiliar excluida del CIWS | BLOQUEADA | BLOQUEADA |
+| `projectexplosive:smoketrail` | Reconocido; estela excluida del CIWS | BLOQUEADA | BLOQUEADA |
+| `projectexplosive:fire_trail` | Reconocido; estela excluida del CIWS | BLOQUEADA | BLOQUEADA |
+| `projectexplosive:multi_block` | Reconocido; entidad auxiliar excluida del CIWS | BLOQUEADA | BLOQUEADA |
+
+La lista se contrastó con el registro de tipos de entidad de la decompilación local: `ProjectExplosive-0.7.2-beta/lil1llilol11/lo1i1iloioil/l1loi01l110i1o10ooiliol0.java`, líneas 10–46. El README de esa inspección identifica el JAR de origen SHA-256 `3CBF5A76D8B6123A489DF54F0165C31DF6C5F6993DD07E9506232FCB3F3CEBB2` y advierte que Vineflower produjo una reconstrucción aproximada. No se copió código PE. Su licencia indicada en el inventario local es All Rights Reserved; CMI solo incorpora IDs del registro y contratos propios.
+
+El código decompilado del JAR fijado de Create: Radars 0.4.9.4 (`RadarScanningBlockBehavior.scanForEntityTracks`) consulta `getEntitiesOfClass(Projectile.class)` cuando `scanProjectiles` está activo; el escaneo se actualiza cada cinco ticks y limita después por alcance, FOV y rango vertical. `TrackCategory.get` clasifica como `PROJECTILE` por la clase `Projectile` salvo que una etiqueta aplicable tenga precedencia. Los cinco tipos principales PE están registrados sobre `ThrowableProjectile`; las dos estelas son `AbstractArrow`, también proyectiles, así que esos siete pueden aparecer en el barrido físico si el sensor está activo y cubre la posición. Esto solo acredita compatibilidad estática del contrato de consulta, no una pista en partida. `icbm_booster` y `multi_block` están registrados como `Entity` y no entran por la consulta selectiva `Projectile.class`; siguen excluidos de CMI.
+
+### Contrato de colisión auditado estáticamente
+
+En CBC 5.11.7, `AbstractCannonProjectile.clipAndDamage()` recorre entidades candidatas en una AABB barrida, consulta `canHitEntity`, valida intersección/segmento y luego despacha `onHitEntity` para las colisiones aceptadas. El filtro nativo de `canHitEntity` pasa por `Projectile.canHitEntity`, rechaza blancos `Projectile` y entidades no impactables; la cadena vanilla consultada usa `canBeHitByProjectile()`/`isPickable()`, no `isAttackable()`. La Mixin CMI existente solo sustituye el filtro para disparos gestionados y blancos que ya acepta `CombatServices.projectile`.
+
+Los IDs PE no se añadieron a `CombatServices.projectile`, por lo que la Mixin no les concede la colisión/neutralización gestionada. Los tipos de bombas registrados como `ThrowableProjectile` siguen excluidos por el filtro nativo CBC para otros proyectiles; no se habilitó un bypass. `discard()` elimina la entidad a través de la ruta normal de Minecraft, pero la auditoría estática no demuestra que eliminar una ojiva nuclear cancele cualquier efecto o trabajo ya creado fuera de su tick. La continuidad de efectos post-detonación, callbacks de todas las bombas PE, interacción completa con el CBC runtime y resultado de explosiones quedan sin autorización y sin prueba runtime.
+
+La ruta de CBC acumula impactos de una pasada y puede llamar a `onHitEntity` para cada candidato recolectado; la revisión de bytecode no encontró una salida inmediata del bucle tras la primera llamada. La posibilidad real de que una pasada neutralice múltiples objetivos está **INFERIDA**, no validada en juego; no cambia el alcance de PE-01 y queda como riesgo de auditoría del hook CBC existente.
+
+La revisión de las clases PE Mk 82, Mk 84 y Fat Man encontró overrides de `remove(RemovalReason)` que limpian tickets y llaman a `super.remove`; no llaman por sí mismos al handler de impacto. Por tanto, la inspección no muestra que un `discard()` antes del impacto detone esas cargas. Eso no acredita cancelar efectos nucleares que ya hayan sido programados: Fat Man contiene código de crater schedule y creación diferida de entidades/bloques; el vínculo de cancelación de esos trabajos con `remove` no está demostrado. La ruta de Mk 82 que expone `isAttackable() == false` no es consultada por el filtro CBC revisado; `isPickable`/`canBeHitByProjectile` sigue siendo una pregunta separada. La bomba de fuego además puede crear estelas de fuego al detonar; se mantienen excluidas.
+
+En el ICBM, la decompilación muestra fases de vuelo y separación de un booster con UUID propio; algunas ojivas generan otra entidad de bomba al llegar, mientras Fat Man conserva lógica de detonación propia. No se acredita una intercepción segura durante todas las fases. Las rutas de uso de objeto pueden pasar un jugador como owner, pero airstrike, bloque colocado y comando construyen bombas con coordenadas sin propietario visible en esos call sites. CMI no infiere propietario por la plataforma, destino o tipo.
+
+| Capacidad | Estado |
+|---|---|
+| Clasificación de los nueve IDs PE | IMPLEMENTADO ESTÁTICAMENTE |
+| Compatibilidad opcional; PE ausente | IMPLEMENTADO ESTÁTICAMENTE; sin referencias de clases ni dependencia obligatoria |
+| Adquisición CIWS automática de bombas/ICBM PE | BLOQUEADO intencionalmente |
+| Neutralización de cualquier entidad PE | BLOQUEADO intencionalmente |
+| Detección física en radar de bombas/ICBM/estelas `Projectile` | CONDICIONADO a radar activo, `scanProjectiles`, alcance/FOV/rango vertical; PENDIENTE DE VALIDACIÓN EN JUEGO |
+| Detección de booster y `multi_block` con filtros selectivos | BLOQUEADO por no ser `Projectile` y no entrar por `Projectile.class`; su presencia no crea candidato |
+| Colisión PE/CBC y cancelación segura de ojivas | BLOQUEADO hasta auditar detonación, efectos secundarios y procedencia |
+| Funcionamiento junto al mod PE en runtime | PENDIENTE DE VALIDACIÓN EN JUEGO |

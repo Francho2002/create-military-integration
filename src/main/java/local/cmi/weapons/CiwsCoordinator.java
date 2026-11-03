@@ -24,6 +24,7 @@ import local.cmi.core.Actor;
 import local.cmi.core.CombatServices;
 import local.cmi.core.MilitaryContact;
 import local.cmi.core.MountedBlockReference;
+import local.cmi.core.ProjectExplosiveCompatibility;
 import local.cmi.core.Relation;
 import local.cmi.core.TargetId;
 import local.cmi.core.TrajectorySafety;
@@ -326,7 +327,8 @@ public final class CiwsCoordinator {
             UUID id = CiwsPolicy.projectileId(track.trackCategory() == TrackCategory.PROJECTILE, track.id(), now, track.scannedTime());
             if (id == null || !finite(track.position()) || !finite(track.velocity())) continue;
             Entity target = level.getEntity(id);
-            if (target == null || !target.isAlive() || !CombatServices.projectile(target) || !sensorAllows(radarSnapshot, target)) continue;
+            if (target == null || !target.isAlive() || ProjectExplosiveCompatibility.blocksAutomaticCiws(target) ||
+                    !CombatServices.projectile(target) || !sensorAllows(radarSnapshot, target)) continue;
             var contact = CombatServices.resolve(level, new TargetId(TargetId.Kind.ENTITY, id)).orElse(null);
             if (contact == null) { MOTION.invalidate(observer, id); continue; }
             Relation relation = CombatServices.relation(level, actor, contact);
@@ -430,7 +432,8 @@ public final class CiwsCoordinator {
             UUID id = CiwsPolicy.projectileId(track.trackCategory() == TrackCategory.PROJECTILE, track.id(), now, track.scannedTime());
             if (!expected.equals(id) || !finite(track.position()) || !finite(track.velocity())) continue;
             Entity entity = level.getEntity(id);
-            if (entity == null || !entity.isAlive() || !CombatServices.projectile(entity) || !sensorAllows(radarSnapshot, entity)) return false;
+            if (entity == null || !entity.isAlive() || ProjectExplosiveCompatibility.blocksAutomaticCiws(entity) ||
+                    !CombatServices.projectile(entity) || !sensorAllows(radarSnapshot, entity)) return false;
             MilitaryContact contact = CombatServices.resolve(level, new TargetId(TargetId.Kind.ENTITY, id)).orElse(null);
             if (contact == null || !CiwsPolicy.eligible(true, contact.projectile(), actor.owner(), contact.owner(), actor.platform(), contact.platform(),
                     CombatServices.relation(level, actor, contact), CombatServices.canEngage(level, actor, contact))) return false;
@@ -447,7 +450,8 @@ public final class CiwsCoordinator {
 
     private static boolean radarTrackStillCurrent(IRadar radar, Entity expected, UUID target, long scannedAt, long now) {
         RadarSnapshot snapshot = projectileTracks(radar);
-        if (snapshot == null || expected == null || target == null || !expected.isAlive()) return false;
+        if (snapshot == null || expected == null || target == null || !expected.isAlive() ||
+                ProjectExplosiveCompatibility.blocksAutomaticCiws(expected)) return false;
         for (RadarTrack track : snapshot.tracks()) {
             UUID id = CiwsPolicy.projectileId(track.trackCategory() == TrackCategory.PROJECTILE,
                     track.id(), now, track.scannedTime());
